@@ -1,4 +1,4 @@
-mport streamlit as st
+import streamlit as st
 import streamlit.components.v1 as components
 
 # 1. Configuración de la página para que ocupe todo el ancho
