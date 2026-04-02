@@ -11,7 +11,6 @@ import {
   Search, 
   RefreshCw, 
   Download, 
-  Menu,
   Clock,
   Wifi,
   Globe
@@ -20,21 +19,21 @@ import {
 const apiKey = "";
 
 const App = () => {
-  // --- State Management ---
+  // --- Gestión de Estado ---
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [lastUpdate, setLastUpdate] = useState(new Date().toLocaleTimeString());
 
-  // --- Mock Data ---
+  // --- Datos de Simulación ---
   const metricsData = [
-    { name: '00:00', latency: 45, bandwidth: 65, status: 'Normal' },
-    { name: '04:00', latency: 42, bandwidth: 40, status: 'Normal' },
-    { name: '08:00', latency: 85, bandwidth: 92, status: 'High' },
-    { name: '12:00', latency: 60, bandwidth: 88, status: 'Normal' },
-    { name: '16:00', latency: 55, bandwidth: 75, status: 'Normal' },
-    { name: '20:00', latency: 48, bandwidth: 60, status: 'Normal' },
+    { name: '00:00', latency: 45, bandwidth: 65 },
+    { name: '04:00', latency: 42, bandwidth: 40 },
+    { name: '08:00', latency: 85, bandwidth: 92 },
+    { name: '12:00', latency: 60, bandwidth: 88 },
+    { name: '16:00', latency: 55, bandwidth: 75 },
+    { name: '20:00', latency: 48, bandwidth: 60 },
   ];
 
   const distributionData = [
@@ -50,7 +49,7 @@ const App = () => {
     { id: 'INC-004', service: 'Database Cluster B', impact: 'Alto', status: 'Monitoreando', time: '10:05 AM' },
   ];
 
-  // --- Gemini Search API Integration ---
+  // --- Integración con API de Búsqueda Gemini ---
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -105,7 +104,7 @@ const App = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      {/* Sidebar / Navigation */}
+      {/* Navegación Lateral */}
       <nav className="fixed top-0 left-0 h-full w-20 md:w-64 bg-slate-900 text-white z-50 flex flex-col items-center py-6 shadow-2xl">
         <div className="mb-10 flex items-center gap-2 px-4">
           <Activity className="text-blue-400 w-8 h-8" />
@@ -137,10 +136,10 @@ const App = () => {
         </div>
       </nav>
 
-      {/* Main Content */}
+      {/* Contenido Principal */}
       <main className="ml-20 md:ml-64 p-4 md:p-8 pt-6">
         
-        {/* Header */}
+        {/* Encabezado */}
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-800">Panel de Control Operativo</h1>
@@ -164,7 +163,7 @@ const App = () => {
 
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
-            {/* Quick Metrics */}
+            {/* Métricas Rápidas */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
               {[
                 { label: 'Uptime Global', value: '99.98%', sub: '+0.02%', color: 'text-emerald-600', bg: 'bg-emerald-50', icon: ShieldCheck },
@@ -187,9 +186,8 @@ const App = () => {
               ))}
             </div>
 
-            {/* Charts Row */}
+            {/* Fila de Gráficos */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Bandwidth vs Latency */}
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                 <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
                   <Activity size={18} className="text-blue-500" /> Rendimiento en Tiempo Real
@@ -216,12 +214,11 @@ const App = () => {
                 </div>
               </div>
 
-              {/* Status Distribution */}
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                 <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
                   <ShieldCheck size={18} className="text-emerald-500" /> Estado de Dispositivos
                 </h3>
-                <div className="h-[300px] w-full flex items-center justify-center">
+                <div className="h-[300px] w-full flex items-center justify-center relative">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -240,7 +237,7 @@ const App = () => {
                   </ResponsiveContainer>
                   <div className="absolute flex flex-col items-center">
                     <span className="text-3xl font-bold text-slate-800">142</span>
-                    <span className="text-xs text-slate-400 font-medium">TOTAL NODOS</span>
+                    <span className="text-xs text-slate-400 font-medium uppercase">Total Nodos</span>
                   </div>
                 </div>
                 <div className="flex justify-center gap-6 mt-4">
@@ -254,7 +251,7 @@ const App = () => {
               </div>
             </div>
 
-            {/* Incidents Table */}
+            {/* Tabla de Incidentes */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
               <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                 <h3 className="text-lg font-bold text-slate-800">Incidentes Recientes</h3>
@@ -264,10 +261,10 @@ const App = () => {
                 <table className="w-full text-left">
                   <thead>
                     <tr className="bg-slate-50/50">
-                      <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">ID / Servicio</th>
+                      <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Servicio</th>
                       <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Prioridad</th>
                       <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Estado</th>
-                      <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Hora Reporte</th>
+                      <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Reporte</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -318,13 +315,13 @@ const App = () => {
                 type="text" 
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Escribe tu consulta... (ej: ¿Cómo mejorar latencia en saltos de red?)"
-                className="w-full bg-white border-2 border-slate-100 rounded-2xl px-6 py-5 pr-16 shadow-lg text-lg focus:border-blue-500 focus:outline-none transition-all placeholder:text-slate-400"
+                placeholder="Escribe tu consulta... (ej: ¿Cómo mejorar latencia?)"
+                className="w-full bg-white border-2 border-slate-100 rounded-2xl px-6 py-5 pr-16 shadow-lg text-lg focus:border-blue-500 focus:outline-none transition-all"
               />
               <button 
                 type="submit"
                 disabled={loading}
-                className="absolute right-4 top-1/2 -translate-y-1/2 bg-blue-600 text-white p-3 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="absolute right-4 top-1/2 -translate-y-1/2 bg-blue-600 text-white p-3 rounded-xl hover:bg-blue-700 disabled:opacity-50"
               >
                 {loading ? <RefreshCw className="animate-spin" size={24} /> : <Search size={24} />}
               </button>
@@ -338,19 +335,19 @@ const App = () => {
                     href={result.uri} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all group"
+                    className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:border-blue-200 transition-all group"
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex gap-4">
-                        <div className="bg-slate-100 p-3 rounded-lg group-hover:bg-blue-50 transition-colors">
+                        <div className="bg-slate-100 p-3 rounded-lg group-hover:bg-blue-50">
                           <Globe size={24} className="text-slate-400 group-hover:text-blue-500" />
                         </div>
                         <div>
-                          <h4 className="text-lg font-bold text-slate-800 group-hover:text-blue-600 transition-colors">{result.title}</h4>
-                          <p className="text-sm text-slate-500 mt-1 line-clamp-1">{result.uri}</p>
+                          <h4 className="text-lg font-bold text-slate-800 group-hover:text-blue-600">{result.title}</h4>
+                          <p className="text-sm text-slate-500 mt-1">{result.uri}</p>
                         </div>
                       </div>
-                      <span className="text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">Ir al sitio &rarr;</span>
+                      <span className="text-blue-600 opacity-0 group-hover:opacity-100">Ir al sitio &rarr;</span>
                     </div>
                   </a>
                 ))
@@ -377,7 +374,6 @@ const App = () => {
             </div>
           </div>
         )}
-
       </main>
     </div>
   );
