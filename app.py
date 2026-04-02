@@ -1,170 +1,204 @@
-import streamlit as st
-import pandas as pd
-import io
-from datetime import datetime
-from docx import Document
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Meru NOC - Generador de Informes", layout="wide", page_icon="📊")
-
-def clean_meru_csv(file, expected_keywords):
-    """Limpia archivos CSV que tienen metadatos en las primeras filas"""
-    if file is None: return None
-    try:
-        # Leer todo el archivo
-        content = file.getvalue().decode('utf-8')
-        df_raw = pd.read_csv(io.StringIO(content), header=None)
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meru Networks NOC</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
         
-        # Buscar la fila que contiene las palabras clave esperadas
-        header_row_idx = 0
-        for i, row in df_raw.iterrows():
-            row_str = " ".join(row.astype(str).values).upper()
-            if all(kw.upper() in row_str for kw in expected_keywords):
-                header_row_idx = i
-                break
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            margin: 0;
+            overflow-x: hidden;
+        }
+
+        .glass-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .glass-card:hover {
+            border: 1px solid rgba(59, 130, 246, 0.5);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);
+        }
+
+        .meru-gradient {
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+        }
+
+        .status-dot {
+            height: 10px;
+            width: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 8px currentColor;
+        }
+    </style>
+</head>
+<body class="p-6">
+
+    <!-- Header / Navbar -->
+    <header class="flex justify-between items-center mb-8 px-4">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 meru-gradient rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
+                <i class="fas fa-broadcast-tower text-white text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight text-white">MERU <span class="text-blue-400">NETWORKS</span></h1>
+                <p class="text-slate-400 text-xs font-medium uppercase tracking-widest">Global NOC Operations</p>
+            </div>
+        </div>
+
+        <div class="flex gap-4">
+            <div class="glass-card px-4 py-2 flex items-center gap-3">
+                <span class="status-dot text-emerald-400 bg-emerald-400"></span>
+                <span class="text-sm font-semibold">Sistema Online</span>
+            </div>
+            <button class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-bold transition-all flex items-center gap-2">
+                <i class="fas fa-file-export"></i> Exportar Reporte
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <!-- KPI 1 -->
+        <div class="glass-card p-6">
+            <div class="flex justify-between items-start mb-4">
+                <p class="text-slate-400 text-sm font-medium">Sitios Totales</p>
+                <i class="fas fa-network-wired text-blue-400"></i>
+            </div>
+            <h3 class="text-3xl font-bold">1,248</h3>
+            <p class="text-emerald-400 text-xs mt-2 font-bold"><i class="fas fa-arrow-up"></i> +12% esta semana</p>
+        </div>
+
+        <!-- KPI 2 -->
+        <div class="glass-card p-6">
+            <div class="flex justify-between items-start mb-4">
+                <p class="text-slate-400 text-sm font-medium">Tráfico Promedio</p>
+                <i class="fas fa-chart-line text-purple-400"></i>
+            </div>
+            <h3 class="text-3xl font-bold">42.5 TB</h3>
+            <p class="text-slate-400 text-xs mt-2 font-medium">Consumo mensual</p>
+        </div>
+
+        <!-- KPI 3 -->
+        <div class="glass-card p-6">
+            <div class="flex justify-between items-start mb-4">
+                <p class="text-slate-400 text-sm font-medium">Disponibilidad</p>
+                <i class="fas fa-check-circle text-emerald-400"></i>
+            </div>
+            <h3 class="text-3xl font-bold text-emerald-400">99.9%</h3>
+            <p class="text-slate-400 text-xs mt-2 font-medium">SLA Objetivo</p>
+        </div>
+
+        <!-- KPI 4 -->
+        <div class="glass-card p-6 border-l-4 border-red-500">
+            <div class="flex justify-between items-start mb-4">
+                <p class="text-slate-400 text-sm font-medium">Alertas NOC</p>
+                <i class="fas fa-exclamation-triangle text-red-500"></i>
+            </div>
+            <h3 class="text-3xl font-bold">03</h3>
+            <p class="text-red-400 text-xs mt-2 font-bold underline cursor-pointer">Ver tickets críticos</p>
+        </div>
+    </div>
+
+    <!-- Charts and Data -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        # Re-leer desde esa fila
-        df = pd.read_csv(io.StringIO(content), skiprows=header_row_idx)
-        df.columns = [str(c).strip().upper() for c in df.columns]
-        # Eliminar filas totalmente vacías
-        df = df.dropna(how='all').reset_index(drop=True)
-        return df
-    except Exception as e:
-        st.error(f"Error procesando {file.name}: {e}")
-        return None
+        <!-- Grafica Principal -->
+        <div class="lg:col-span-2 glass-card p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h4 class="font-bold text-lg">Histórico de Conectividad (7 días)</h4>
+                <div class="flex gap-2">
+                    <span class="px-3 py-1 bg-blue-500/10 text-blue-400 rounded text-xs font-bold uppercase">Activos</span>
+                    <span class="px-3 py-1 bg-slate-700 text-slate-400 rounded text-xs font-bold uppercase">Inactivos</span>
+                </div>
+            </div>
+            <div class="h-64 flex items-center justify-center">
+                <canvas id="mainChart"></canvas>
+            </div>
+        </div>
 
-def generate_word_report(df_internas, df_isp, df_reclamos):
-    """Genera el Informe de Gestión Mensual en formato Word"""
-    doc = Document()
-    
-    # Título Principal
-    title = doc.add_heading('INFORME DE GESTIÓN MENSUAL: RED SATELITAL MERU', 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    # Datos de encabezado
-    p = doc.add_paragraph()
-    p.add_run('Periodo: ').bold = True
-    p.add_run('01 de marzo de 2026 al 31 de marzo de 2026\n')
-    p.add_run('Departamento: ').bold = True
-    p.add_run('Operaciones de Red (NOC) / Soporte Técnico')
-    
-    # 1. Resumen Ejecutivo
-    doc.add_heading('1. RESUMEN EJECUTIVO', level=1)
-    disp = 98.5 # Valor base ejemplo
-    total_fallas = len(df_internas) + len(df_isp)
-    doc.add_paragraph(
-        f"Durante el mes de marzo de 2026, la red operó con un cumplimiento del SLA del {disp}%. "
-        f"Se registraron un total de {total_fallas} eventos técnicos, de los cuales "
-        f"{len(df_isp)} correspondieron a incidencias de proveedores externos (ISP) y {len(df_internas)} a fallas internas de infraestructura."
-    )
-    
-    # 2. Fallas Internas
-    doc.add_heading('2. REPORTE DE FALLAS INTERNAS', level=1)
-    table = doc.add_table(rows=1, cols=4)
-    table.style = 'Table Grid'
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'FECHA'
-    hdr_cells[1].text = 'TIPO DE FALLA'
-    hdr_cells[2].text = 'AFECTADOS'
-    hdr_cells[3].text = 'DURACIÓN'
-    
-    # Agregar hasta 10 filas para no saturar el doc
-    for i, row in df_internas.head(10).iterrows():
-        row_cells = table.add_row().cells
-        row_cells[0].text = str(row.get('FECHA DE FALLA', row.get('FECHA', 'N/A')))
-        row_cells[1].text = str(row.get('TIPO DE FALLA', 'N/A'))
-        row_cells[2].text = str(row.get('ABONADOS AFECTADOS', 'N/A'))
-        row_cells[3].text = str(row.get('DURACIÓN DE FALLA', 'N/A'))
+        <!-- Panel de Carga de Archivos (UI Mejorada) -->
+        <div class="glass-card p-6">
+            <h4 class="font-bold text-lg mb-4 flex items-center gap-2">
+                <i class="fas fa-cloud-upload-alt text-blue-400"></i> Carga de Archivos
+            </h4>
+            <div class="border-2 border-dashed border-slate-700 rounded-xl p-8 text-center hover:border-blue-500 transition-all group cursor-pointer">
+                <i class="fas fa-file-csv text-4xl text-slate-500 group-hover:text-blue-400 mb-4 transition-colors"></i>
+                <p class="text-slate-300 font-medium">Arrastra tus archivos CSV aquí</p>
+                <p class="text-slate-500 text-xs mt-1">Límite: 20MB por archivo</p>
+            </div>
 
-    # 3. Reclamos Abonados
-    doc.add_heading('3. GESTIÓN DE RECLAMOS DE ABONADOS', level=1)
-    doc.add_paragraph(f"Total de reclamos atendidos: {len(df_reclamos)}")
-    
-    # Conclusiones
-    doc.add_heading('4. CONCLUSIONES', level=1)
-    doc.add_paragraph("Se recomienda mantener el monitoreo preventivo ante la temporada de lluvias.")
-    
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer
+            <div class="mt-6 space-y-4">
+                <div class="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
+                    <div class="flex items-center gap-3">
+                        <i class="far fa-file-alt text-blue-400"></i>
+                        <span class="text-sm font-medium text-slate-200">sitios_meru_oct.csv</span>
+                    </div>
+                    <span class="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded font-bold">LISTO</span>
+                </div>
+                <div class="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
+                    <div class="flex items-center gap-3">
+                        <i class="far fa-file-alt text-blue-400"></i>
+                        <span class="text-sm font-medium text-slate-200">trafico_nodos.csv</span>
+                    </div>
+                    <span class="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-1 rounded font-bold">PROCESANDO</span>
+                </div>
+            </div>
+        </div>
 
-# --- INTERFAZ STREAMLIT ---
-st.title("📡 Meru NOC: Analizador y Generador de Reportes")
-st.info("Cargue los archivos CSV de Marzo 2026 para generar el consolidado en Excel e Informe Word.")
+    </div>
 
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.subheader("1. Fallas Internas")
-    file_fallas = st.file_uploader("Subir CSV Internas", type=['csv'], key="fallas")
-
-with col2:
-    st.subheader("2. Reporte ISP")
-    file_isp = st.file_uploader("Subir CSV ISP", type=['csv'], key="isp")
-
-with col3:
-    st.subheader("3. Reclamos")
-    file_reclamos = st.file_uploader("Subir CSV Reclamos", type=['csv'], key="reclamos")
-
-# PROCESAR SI ESTÁN CARGADOS
-if file_fallas and file_isp and file_reclamos:
-    # Definir palabras clave para encontrar encabezados
-    df_f = clean_meru_csv(file_fallas, ["FECHA", "TIPO DE FALLA", "DURACIÓN"])
-    df_i = clean_meru_csv(file_isp, ["NOMBRE ISP", "TIPO DE FALLA", "RESPUESTA ISP"])
-    df_r = clean_meru_csv(file_reclamos, ["ABONADO", "TIPO DE RECLAMO", "SOLUCIÓN"])
-
-    if df_f is not None and df_i is not None and df_r is not None:
-        st.success("✅ Archivos procesados correctamente.")
-        
-        # --- VISTA PREVIA ---
-        with st.expander("Ver Datos Procesados"):
-            t1, t2, t3 = st.tabs(["Fallas Internas", "Reporte ISP", "Reclamos"])
-            t1.dataframe(df_f.head())
-            t2.dataframe(df_i.head())
-            t3.dataframe(df_r.head())
-
-        st.markdown("---")
-        st.subheader("📥 Descargar Entregables")
-        
-        d_col1, d_col2 = st.columns(2)
-        
-        # Generar Excel
-        output_excel = io.BytesIO()
-        with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
-            df_f.to_excel(writer, sheet_name='Fallas Internas', index=False)
-            df_i.to_excel(writer, sheet_name='Reporte ISP', index=False)
-            df_r.to_excel(writer, sheet_name='Reclamos Abonados', index=False)
-        
-        d_col1.download_button(
-            label="📊 Descargar Excel Consolidado",
-            data=output_excel.getvalue(),
-            file_name="CONSOLIDADO_MARZO_2026_MERU.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        
-        # Generar Word
-        word_buffer = generate_word_report(df_f, df_i, df_r)
-        d_col2.download_button(
-            label="📝 Descargar Informe Word (DOCX)",
-            data=word_buffer,
-            file_name="INFORME_GESTION_MARZO_2026_MERU.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
-        
-        # --- WHATSAPP PREVIEW ---
-        st.markdown("---")
-        st.subheader("📲 Resumen para WhatsApp")
-        whatsapp_text = f"""*REPORTE NOC MERU - MARZO 2026* 📡
-
-✅ *Fallas Internas:* {len(df_f)} eventos atendidos.
-🌐 *Fallas ISP:* {len(df_i)} eventos reportados.
-🎫 *Gestión Abonados:* {len(df_r)} reclamos gestionados.
-
-_Informe generado automáticamente por el Sistema de Gestión Meru_"""
-        st.code(whatsapp_text, language=None)
-
-else:
-    st.warning("Esperando la carga de los 3 archivos para habilitar las descargas.")
+    <script>
+        // Configuración de la Gráfica
+        const ctx = document.getElementById('mainChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'],
+                datasets: [{
+                    label: 'Conectividad %',
+                    data: [98, 99, 97, 100, 99.5, 99.8, 99.9],
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    borderWidth: 3,
+                    pointBackgroundColor: '#3b82f6',
+                    pointBorderWidth: 2,
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#94a3b8' }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#94a3b8' }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
