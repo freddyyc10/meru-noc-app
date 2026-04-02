@@ -1,295 +1,386 @@
-import streamlit as st
-import streamlit.components.v1 as components
-import json
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+  LineChart, Line, AreaChart, Area, PieChart, Pie, Cell 
+} from 'recharts';
+import { 
+  Activity, 
+  ShieldCheck, 
+  AlertTriangle, 
+  Server, 
+  Search, 
+  RefreshCw, 
+  Download, 
+  Menu,
+  Clock,
+  Wifi,
+  Globe
+} from 'lucide-react';
 
-# --- CONFIGURACIÓN DE STREAMLIT ---
-st.set_page_config(
-    page_title="Meru Networks - NOC AI Dashboard",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+const apiKey = "";
 
-# --- ESTILOS DE INTEGRACIÓN ---
-st.markdown("""
-    <style>
-        .block-container { padding: 0rem !important; max-width: 100% !important; }
-        footer {display: none;}
-        #MainMenu {visibility: hidden;}
-        header {visibility: hidden;}
-        .stApp { background-color: #f8fafc; }
-    </style>
-""", unsafe_allow_html=True)
+const App = () => {
+  // --- State Management ---
+  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [lastUpdate, setLastUpdate] = useState(new Date().toLocaleTimeString());
 
-# --- LÓGICA DE LA IA (GEMINI) ---
-apiKey = "" # El entorno proporciona la clave automáticamente
+  // --- Mock Data ---
+  const metricsData = [
+    { name: '00:00', latency: 45, bandwidth: 65, status: 'Normal' },
+    { name: '04:00', latency: 42, bandwidth: 40, status: 'Normal' },
+    { name: '08:00', latency: 85, bandwidth: 92, status: 'High' },
+    { name: '12:00', latency: 60, bandwidth: 88, status: 'Normal' },
+    { name: '16:00', latency: 55, bandwidth: 75, status: 'Normal' },
+    { name: '20:00', latency: 48, bandwidth: 60, status: 'Normal' },
+  ];
 
-def get_ai_analysis(user_query, context_data=""):
-    system_prompt = f"""
-    Eres un experto Ingeniero de Redes (NOC) de Meru Networks. 
-    Analiza el siguiente reporte de tickets y responde consultas técnicas.
-    Contexto de los datos actuales: {context_data}
-    
-    Instrucciones:
-    1. Si hay fallas críticas, identifícalas por ID de Ticket.
-    2. Sugiere pasos de troubleshooting (revisión de energía, fibra, saturación de canal).
-    3. Sé conciso y profesional.
-    """
-    
-    import requests
-    import time
-    
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={apiKey}"
-    payload = {
-        "contents": [{
-            "parts": [{"text": f"Pregunta del usuario: {user_query}"}]
-        }],
-        "systemInstruction": {
-            "parts": [{"text": system_prompt}]
+  const distributionData = [
+    { name: 'Activo', value: 85, color: '#10b981' },
+    { name: 'Mantenimiento', value: 10, color: '#f59e0b' },
+    { name: 'Crítico', value: 5, color: '#ef4444' },
+  ];
+
+  const incidents = [
+    { id: 'INC-001', service: 'Core Router AR-01', impact: 'Crítico', status: 'En Progreso', time: '10:45 AM' },
+    { id: 'INC-002', service: 'Cloud Gateway West', impact: 'Bajo', status: 'Resuelto', time: '09:20 AM' },
+    { id: 'INC-003', service: 'VPN Auth Service', impact: 'Medio', status: 'Abierto', time: '11:15 AM' },
+    { id: 'INC-004', service: 'Database Cluster B', impact: 'Alto', status: 'Monitoreando', time: '10:05 AM' },
+  ];
+
+  // --- Gemini Search API Integration ---
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+
+    setLoading(true);
+    let retries = 0;
+    const maxRetries = 5;
+
+    const performSearch = async () => {
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: searchQuery }] }],
+            tools: [{ "google_search": {} }]
+          })
+        });
+
+        if (!response.ok) throw new Error('API Error');
+        
+        const result = await response.json();
+        const sources = result.candidates?.[0]?.groundingMetadata?.groundingAttributions?.map(a => ({
+          uri: a.web?.uri,
+          title: a.web?.title
+        })) || [];
+        
+        setSearchResults(sources);
+      } catch (error) {
+        if (retries < maxRetries) {
+          const delay = Math.pow(2, retries) * 1000;
+          retries++;
+          setTimeout(performSearch, delay);
+        } else {
+          setSearchResults([{ title: "Error en la búsqueda", uri: "#" }]);
         }
-    }
-    
-    for delay in [1, 2, 4, 8, 16]:
-        try:
-            response = requests.post(url, json=payload)
-            if response.status_code == 200:
-                result = response.json()
-                return result['candidates'][0]['content']['parts'][0]['text']
-        except:
-            time.sleep(delay)
-    return "Error al conectar con la IA de Meru. Por favor, reintenta."
+      } finally {
+        setLoading(false);
+      }
+    };
 
-# --- INTERFAZ DEL DASHBOARD (HTML/JS/TAILWIND) ---
-dashboard_html = """
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #1e293b; }
-        .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(8px); border: 1px solid rgba(226, 232, 240, 0.8); }
-        .ai-chat-bubble { border-radius: 18px 18px 18px 2px; }
-        .user-chat-bubble { border-radius: 18px 18px 2px 18px; }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-    </style>
-</head>
-<body class="h-screen flex overflow-hidden">
+    performSearch();
+  };
 
-    <!-- Sidebar AI Panel -->
-    <aside id="aiSidebar" class="w-96 bg-white border-r border-slate-200 flex flex-col shadow-2xl z-20">
-        <div class="p-6 border-b border-slate-100 flex items-center justify-between bg-blue-600 text-white">
-            <div class="flex items-center gap-3">
-                <i class="fas fa-robot text-xl"></i>
-                <h2 class="font-bold">Asistente IA NOC</h2>
-            </div>
-            <span class="text-xs bg-blue-500 px-2 py-1 rounded">Beta</span>
+  const refreshDashboard = () => {
+    setLoading(true);
+    setTimeout(() => {
+      setLastUpdate(new Date().toLocaleTimeString());
+      setLoading(false);
+    }, 800);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      {/* Sidebar / Navigation */}
+      <nav className="fixed top-0 left-0 h-full w-20 md:w-64 bg-slate-900 text-white z-50 flex flex-col items-center py-6 shadow-2xl">
+        <div className="mb-10 flex items-center gap-2 px-4">
+          <Activity className="text-blue-400 w-8 h-8" />
+          <span className="hidden md:block font-bold text-xl tracking-tight uppercase">Meru NOC</span>
         </div>
         
-        <div id="chatContainer" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
-            <div class="ai-chat-bubble bg-white p-3 shadow-sm border border-slate-200 text-sm">
-                Hola, soy el analista de Meru Networks. <b>Sube un archivo CSV</b> para que pueda analizar el estado de la red.
-            </div>
+        <div className="flex flex-col w-full gap-2 px-2">
+          {[
+            { id: 'dashboard', icon: Server, label: 'Dashboard' },
+            { id: 'network', icon: Globe, label: 'Red Global' },
+            { id: 'alerts', icon: AlertTriangle, label: 'Alertas' },
+            { id: 'search', icon: Search, label: 'IA Consultor' }
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`flex items-center gap-4 p-3 rounded-lg transition-all ${
+                activeTab === item.id ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 text-slate-400'
+              }`}
+            >
+              <item.icon size={24} />
+              <span className="hidden md:block font-medium">{item.label}</span>
+            </button>
+          ))}
         </div>
 
-        <div class="p-4 bg-white border-t border-slate-100">
-            <div class="relative">
-                <input id="aiInput" type="text" placeholder="Pregunta sobre los tickets..." 
-                       class="w-full pl-4 pr-12 py-3 bg-slate-100 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                <button id="sendAi" class="absolute right-2 top-2 bg-blue-600 text-white p-1.5 rounded-lg hover:bg-blue-700 transition-all">
-                    <i class="fas fa-paper-plane"></i>
-                </button>
-            </div>
-            <p class="text-[10px] text-center mt-2 text-slate-400 font-medium">Potenciado por Gemini 2.5 Flash</p>
+        <div className="mt-auto w-full px-4 text-xs text-slate-500 hidden md:block">
+          <p>© 2024 Meru NOC v2.0</p>
         </div>
-    </aside>
+      </nav>
 
-    <!-- Main Workspace -->
-    <main class="flex-1 flex flex-col min-w-0 bg-slate-50/50">
-        <!-- Header -->
-        <header class="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between shrink-0">
-            <div class="flex items-center gap-4">
-                <div class="bg-blue-600 p-2 rounded-lg text-white">
-                    <i class="fas fa-network-wired"></i>
-                </div>
-                <h1 class="text-slate-800 font-bold text-lg">Meru NOC Intelligence</h1>
-            </div>
-            
-            <div class="flex items-center gap-4">
-                <button id="uploadBtn" class="bg-slate-900 hover:bg-black text-white px-5 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2">
-                    <i class="fas fa-plus"></i> Cargar Reporte
-                </button>
-                <input type="file" id="csvFile" accept=".csv" class="hidden">
-            </div>
+      {/* Main Content */}
+      <main className="ml-20 md:ml-64 p-4 md:p-8 pt-6">
+        
+        {/* Header */}
+        <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold text-slate-800">Panel de Control Operativo</h1>
+            <p className="text-slate-500 flex items-center gap-2 mt-1">
+              <Clock size={14} /> Última actualización: {lastUpdate}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={refreshDashboard}
+              className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-lg shadow-sm hover:bg-slate-50 active:scale-95 transition-all text-sm font-medium"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              Sincronizar
+            </button>
+            <button className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all text-sm font-medium flex items-center gap-2">
+              <Download size={16} /> Exportar Reporte
+            </button>
+          </div>
         </header>
 
-        <!-- Stats & Charts Area -->
-        <div class="flex-1 overflow-y-auto p-8">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div class="glass p-5 rounded-2xl">
-                    <p class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Tickets Totales</p>
-                    <h3 id="statTotal" class="text-3xl font-black text-slate-900">0</h3>
+        {activeTab === 'dashboard' && (
+          <div className="space-y-6">
+            {/* Quick Metrics */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+              {[
+                { label: 'Uptime Global', value: '99.98%', sub: '+0.02%', color: 'text-emerald-600', bg: 'bg-emerald-50', icon: ShieldCheck },
+                { label: 'Latencia Media', value: '52ms', sub: '-5ms', color: 'text-blue-600', bg: 'bg-blue-50', icon: Activity },
+                { label: 'Alertas Activas', value: '12', sub: '3 Críticas', color: 'text-amber-600', bg: 'bg-amber-50', icon: AlertTriangle },
+                { label: 'Uso de Tráfico', value: '1.2 TB', sub: 'Pico: 1.8 TB', color: 'text-indigo-600', bg: 'bg-indigo-50', icon: Wifi }
+              ].map((m, i) => (
+                <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-slate-500 text-sm font-medium mb-1">{m.label}</p>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-2xl font-bold text-slate-800">{m.value}</span>
+                      <span className={`text-xs font-semibold ${m.color}`}>{m.sub}</span>
+                    </div>
+                  </div>
+                  <div className={`${m.bg} p-3 rounded-xl`}>
+                    <m.icon className={m.color} size={24} />
+                  </div>
                 </div>
-                <div class="glass p-5 rounded-2xl border-b-4 border-b-red-500">
-                    <p class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Alertas Críticas</p>
-                    <h3 id="statCritical" class="text-3xl font-black text-red-600">0</h3>
-                </div>
-                <div class="glass p-5 rounded-2xl border-b-4 border-b-green-500">
-                    <p class="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Resueltos (SLA)</p>
-                    <h3 id="statResolved" class="text-3xl font-black text-green-600">0</h3>
-                </div>
+              ))}
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <div class="glass p-6 rounded-3xl h-[400px] flex flex-col">
-                    <h4 class="font-bold mb-4 flex items-center gap-2">
-                        <i class="fas fa-chart-pie text-blue-500"></i> Análisis de Carga
-                    </h4>
-                    <div class="flex-1 min-h-0">
-                        <canvas id="mainChart"></canvas>
-                    </div>
+            {/* Charts Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Bandwidth vs Latency */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
+                  <Activity size={18} className="text-blue-500" /> Rendimiento en Tiempo Real
+                </h3>
+                <div className="h-[300px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={metricsData}>
+                      <defs>
+                        <linearGradient id="colorBand" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                      />
+                      <Area type="monotone" dataKey="bandwidth" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorBand)" />
+                      <Line type="monotone" dataKey="latency" stroke="#f43f5e" strokeWidth={2} dot={{ r: 4 }} />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
-                <div class="glass p-6 rounded-3xl h-[400px] flex flex-col">
-                    <h4 class="font-bold mb-4 flex items-center gap-2">
-                        <i class="fas fa-history text-blue-500"></i> Histórico de Eventos
-                    </h4>
-                    <div class="flex-1 min-h-0">
-                        <canvas id="lineChart"></canvas>
-                    </div>
+              </div>
+
+              {/* Status Distribution */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
+                  <ShieldCheck size={18} className="text-emerald-500" /> Estado de Dispositivos
+                </h3>
+                <div className="h-[300px] w-full flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={distributionData}
+                        innerRadius={80}
+                        outerRadius={100}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {distributionData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute flex flex-col items-center">
+                    <span className="text-3xl font-bold text-slate-800">142</span>
+                    <span className="text-xs text-slate-400 font-medium">TOTAL NODOS</span>
+                  </div>
                 </div>
+                <div className="flex justify-center gap-6 mt-4">
+                  {distributionData.map((d, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full" style={{backgroundColor: d.color}}></div>
+                      <span className="text-xs font-medium text-slate-600">{d.name} ({d.value}%)</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-        </div>
-    </main>
 
-    <script>
-        // Comunicación con Streamlit para la IA
-        const sendAiBtn = document.getElementById('sendAi');
-        const aiInput = document.getElementById('aiInput');
-        const chatContainer = document.getElementById('chatContainer');
-        const uploadBtn = document.getElementById('uploadBtn');
-        const csvFile = document.getElementById('csvFile');
-        
-        let globalDataString = "No hay datos cargados.";
-        let mainChart, lineChart;
+            {/* Incidents Table */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-lg font-bold text-slate-800">Incidentes Recientes</h3>
+                <span className="text-xs font-bold px-3 py-1 bg-slate-100 text-slate-600 rounded-full">Ver todos</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-slate-50/50">
+                      <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">ID / Servicio</th>
+                      <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Prioridad</th>
+                      <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Estado</th>
+                      <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Hora Reporte</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {incidents.map((incident) => (
+                      <tr key={incident.id} className="hover:bg-slate-50/80 transition-colors group">
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-bold text-slate-700">{incident.service}</span>
+                            <span className="text-xs text-slate-400 font-mono">{incident.id}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${
+                            incident.impact === 'Crítico' ? 'bg-rose-100 text-rose-600' :
+                            incident.impact === 'Alto' ? 'bg-orange-100 text-orange-600' :
+                            'bg-blue-100 text-blue-600'
+                          }`}>
+                            {incident.impact}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="text-sm font-medium text-slate-600">{incident.status}</span>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-500 italic">
+                          {incident.time}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
 
-        function addMessage(text, isUser = false) {
-            const div = document.createElement('div');
-            div.className = isUser ? 'user-chat-bubble bg-blue-600 text-white p-3 self-end text-sm ml-8 shadow-sm' : 'ai-chat-bubble bg-white p-3 shadow-sm border border-slate-200 text-sm mr-8';
-            div.innerHTML = text;
-            chatContainer.appendChild(div);
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
+        {activeTab === 'search' && (
+          <div className="max-w-4xl mx-auto py-8">
+            <div className="text-center mb-10">
+              <div className="bg-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-blue-100">
+                <Search className="text-white" size={32} />
+              </div>
+              <h2 className="text-3xl font-bold text-slate-800 mb-2">Asistente Inteligente Meru</h2>
+              <p className="text-slate-500 text-lg">Consulta estados, averías históricas o mejores prácticas de red.</p>
+            </div>
 
-        // Simulación de envío a la IA vía Streamlit (puente JS-Python)
-        sendAiBtn.onclick = () => {
-            const query = aiInput.value;
-            if(!query) return;
-            addMessage(query, true);
-            aiInput.value = '';
-            
-            // Enviamos mensaje especial a Streamlit para que procese la IA
-            window.parent.postMessage({
-                type: 'streamlit:set_widget_value',
-                data: { id: 'ai_query', value: JSON.stringify({query, context: globalDataString, t: Date.now()}) }
-            }, '*');
-        };
+            <form onSubmit={handleSearch} className="relative mb-12">
+              <input 
+                type="text" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Escribe tu consulta... (ej: ¿Cómo mejorar latencia en saltos de red?)"
+                className="w-full bg-white border-2 border-slate-100 rounded-2xl px-6 py-5 pr-16 shadow-lg text-lg focus:border-blue-500 focus:outline-none transition-all placeholder:text-slate-400"
+              />
+              <button 
+                type="submit"
+                disabled={loading}
+                className="absolute right-4 top-1/2 -translate-y-1/2 bg-blue-600 text-white p-3 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? <RefreshCw className="animate-spin" size={24} /> : <Search size={24} />}
+              </button>
+            </form>
 
-        // Carga de Archivo
-        uploadBtn.onclick = () => csvFile.click();
-        csvFile.onchange = (e) => {
-            const file = e.target.files[0];
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const text = event.target.result;
-                globalDataString = text.substring(0, 2000); // Limitamos el contexto para la IA
-                processDashboardData(text);
-                addMessage("¡Archivo cargado! He analizado los datos. Puedes preguntarme sobre la salud de la red.");
-            };
-            reader.readAsText(file);
-        };
+            <div className="grid gap-6">
+              {searchResults.length > 0 ? (
+                searchResults.map((result, idx) => (
+                  <a 
+                    key={idx} 
+                    href={result.uri} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all group"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex gap-4">
+                        <div className="bg-slate-100 p-3 rounded-lg group-hover:bg-blue-50 transition-colors">
+                          <Globe size={24} className="text-slate-400 group-hover:text-blue-500" />
+                        </div>
+                        <div>
+                          <h4 className="text-lg font-bold text-slate-800 group-hover:text-blue-600 transition-colors">{result.title}</h4>
+                          <p className="text-sm text-slate-500 mt-1 line-clamp-1">{result.uri}</p>
+                        </div>
+                      </div>
+                      <span className="text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">Ir al sitio &rarr;</span>
+                    </div>
+                  </a>
+                ))
+              ) : (
+                !loading && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {[
+                      "Análisis de tráfico semanal",
+                      "Estado de repetidores Mérida",
+                      "Optimización de BGP",
+                      "Manual de contingencia"
+                    ].map((suggestion, i) => (
+                      <button 
+                        key={i} 
+                        onClick={() => setSearchQuery(suggestion)}
+                        className="p-4 bg-white border border-slate-100 rounded-xl text-left text-slate-600 hover:border-blue-200 hover:bg-blue-50/50 transition-all text-sm font-medium"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        )}
 
-        function processDashboardData(csv) {
-            const rows = csv.split('\\n').length - 1;
-            document.getElementById('statTotal').innerText = rows;
-            document.getElementById('statCritical').innerText = Math.floor(rows * 0.12);
-            document.getElementById('statResolved').innerText = Math.floor(rows * 0.75);
-            updateCharts();
-        }
+      </main>
+    </div>
+  );
+};
 
-        function updateCharts() {
-            const ctxMain = document.getElementById('mainChart').getContext('2d');
-            const ctxLine = document.getElementById('lineChart').getContext('2d');
-
-            if(mainChart) mainChart.destroy();
-            if(lineChart) lineChart.destroy();
-
-            mainChart = new Chart(ctxMain, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Crítico', 'Normal', 'Advertencia'],
-                    datasets: [{
-                        data: [12, 75, 13],
-                        backgroundColor: ['#ef4444', '#10b981', '#f59e0b'],
-                        borderWidth: 0
-                    }]
-                },
-                options: { maintainAspectRatio: false }
-            });
-
-            lineChart = new Chart(ctxLine, {
-                type: 'line',
-                data: {
-                    labels: ['00h', '04h', '08h', '12h', '16h', '20h'],
-                    datasets: [{
-                        label: 'Latencia ms',
-                        data: [20, 25, 45, 30, 60, 22],
-                        borderColor: '#3b82f6',
-                        tension: 0.4,
-                        fill: true,
-                        backgroundColor: 'rgba(59, 130, 246, 0.05)'
-                    }]
-                },
-                options: { maintainAspectRatio: false }
-            });
-        }
-
-        window.onload = updateCharts;
-
-        // Escuchar respuesta de la IA desde Streamlit
-        window.addEventListener('message', (e) => {
-            if(e.data.type === 'ai_response') {
-                addMessage(e.data.text);
-            }
-        });
-    </script>
-</body>
-</html>
-"""
-
-# --- LÓGICA DE CONTROLADOR STREAMLIT ---
-# Usamos un componente de "puente" para recibir mensajes de JS
-query_data = st.query_params.get("ai_query", None)
-
-# Manejo de entrada de chat desde el componente HTML
-if 'ai_input_state' not in st.session_state:
-    st.session_state.ai_input_state = None
-
-# Componente oculto para capturar el valor del input del dashboard
-# En Streamlit puro, capturamos el query a través de un widget o query params
-query_raw = st.chat_input("Escribe aquí para la IA (Mirror del dashboard)")
-
-if query_raw:
-    # Si el usuario escribe en el input nativo de Streamlit, procesamos
-    with st.spinner("Analizando red..."):
-        respuesta = get_ai_analysis(query_raw, "Reporte Meru NOC consolidado")
-        st.write(f"**IA NOC:** {respuesta}")
-
-# Renderizar el Dashboard principal
-components.html(dashboard_html, height=900, scrolling=False)
-
-st.info("💡 **Tip de NOC:** Sube el archivo .csv para que la IA pueda detectar patrones de fallas en nodos específicos.")
+export default App;
