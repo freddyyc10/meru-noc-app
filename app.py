@@ -1,148 +1,153 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
 import io
+from datetime import datetime
 
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Meru NOC - Dashboard Dinámico", layout="wide", page_icon="📡")
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="Meru NOC - Gestión Integral", layout="wide", page_icon="📡")
 
-# Estilos profesionales
-st.markdown("""
-    <style>
-    .main { background-color: #f8f9fa; }
-    .stMetric { 
-        background-color: #ffffff; 
-        border-radius: 12px; 
-        padding: 20px; 
-        border-left: 5px solid #004488; 
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
-    }
-    .report-card { 
-        background-color: #ffffff; 
-        padding: 25px; 
-        border-radius: 15px; 
-        border: 1px solid #e0e0e0;
-        margin-bottom: 20px;
-    }
-    h1, h2, h3 { color: #004488; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    </style>
-    """, unsafe_allow_html=True)
+def limpiar_dataframe(df):
+    """Limpia filas vacías iniciales y normaliza columnas"""
+    if df is None: return None
+    # Eliminar filas donde todo es NaN
+    df = df.dropna(how='all').reset_index(drop=True)
+    # Si la primera fila parece ser basura o título, buscar el encabezado real
+    if df.iloc[0].isnull().sum() > len(df.columns) / 2:
+        df.columns = df.iloc[1]
+        df = df[2:].reset_index(drop=True)
+    
+    df.columns = [str(c).strip().upper() for c in df.columns]
+    return df
 
-# --- FUNCIONES DE UTILIDAD ---
-def extraer_periodo(df, col_fecha):
-    """Detecta el mes y año predominante en los datos cargados"""
-    try:
-        fechas = pd.to_datetime(df[col_fecha], errors='coerce').dropna()
-        if not fechas.empty:
-            meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
-                     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-            mes_num = fechas.dt.month.mode()[0]
-            anio = fechas.dt.year.mode()[0]
-            return f"{meses[mes_num-1]} {anio}"
-    except:
-        pass
-    return None
-
-def cargar_datos(label, skip=0):
-    uploaded_file = st.sidebar.file_uploader(label, type=['csv'])
-    if uploaded_file is not None:
+def procesar_csv(file):
+    if file is not None:
+        # Leemos el archivo intentando detectar el separador
         try:
-            df = pd.read_csv(uploaded_file, skiprows=skip, sep=None, engine='python')
-            df = df.dropna(how='all', axis=0)
-            df.columns = [c.strip().upper() for c in df.columns]
-            return df
+            content = file.getvalue().decode('utf-8')
+            df = pd.read_csv(io.StringIO(content), sep=None, engine='python')
+            return limpiar_dataframe(df)
         except Exception as e:
-            st.sidebar.error(f"Error en {label}: {e}")
+            st.error(f"Error al procesar archivo: {e}")
     return None
 
-# --- SIDEBAR ---
-st.sidebar.image("https://img.icons8.com/fluency/96/satellite-sending-signal.png", width=80)
-st.sidebar.header("📥 Carga de Archivos")
+# --- UI PRINCIPAL ---
+st.title("🛰️ Meru-Networks NOC: Dashboard de Operaciones")
+st.markdown("---")
 
-df_fallas = cargar_datos("1. Fallas Internas", skip=3)
-df_isp = cargar_datos("2. Reporte ISP", skip=3)
-df_reclamos = cargar_datos("3. Reclamos Abonados", skip=4)
+# --- SIDEBAR: CARGA DE DATOS ---
+st.sidebar.image("https://img.icons8.com/fluency/96/network.png", width=80)
+st.sidebar.header("📥 Carga de Datos Mensual")
 
-# Selección manual de mes por si la detección falla o el usuario quiere cambiarlo
-st.sidebar.divider()
-st.sidebar.subheader("⚙️ Configuración del Reporte")
-mes_manual = st.sidebar.selectbox("Mes del Reporte", 
-    ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"],
-    index=datetime.now().month - 1)
-anio_manual = st.sidebar.number_input("Año", min_value=2024, max_value=2030, value=2026)
+file_fallas = st.sidebar.file_uploader("1. Fallas Internas (CSV)", type=['csv'])
+file_isp = st.sidebar.file_uploader("2. Reporte ISP (CSV)", type=['csv'])
+file_reclamos = st.sidebar.file_uploader("3. Reclamos Abonados (CSV)", type=['csv'])
 
-# --- LÓGICA DE PERIODO DINÁMICO ---
-periodo_reporte = f"{mes_manual} {anio_manual}"
-if df_reclamos is not None:
-    # Intentar detectar automáticamente el mes del archivo
-    col_fecha_rec = [c for c in df_reclamos.columns if 'FECHA' in c]
-    if col_fecha_rec:
-        detec = extraer_periodo(df_reclamos, col_fecha_rec[0])
-        if detec: periodo_reporte = detec
-
-# --- CABECERA DINÁMICA ---
-col_1, col_2 = st.columns([1, 5])
-with col_2:
-    st.title("📡 Meru-Networks: Sistema NOC")
-    st.markdown(f"#### Reporte de Operaciones | Periodo: **{periodo_reporte}**")
-
-st.divider()
+# --- PROCESAMIENTO ---
+df_fallas = procesar_csv(file_fallas)
+df_isp = procesar_csv(file_isp)
+df_reclamos = procesar_csv(file_reclamos)
 
 if df_fallas is not None and df_reclamos is not None:
-    # KPIs
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        st.metric("Total Reclamos", len(df_reclamos), periodo_reporte)
-    with m2:
-        st.metric("Fallas Internas", len(df_fallas))
-    with m3:
-        n_isp = len(df_isp) if df_isp is not None else 0
-        st.metric("Eventos ISP", n_isp)
-    with m4:
-        st.metric("SLA Estimado", "97.5%")
+    # 1. ANÁLISIS DE TICKETS (Gestor de Tickets)
+    # Identificar columnas de cierre (ajustar según tus nombres reales)
+    col_cierre = [c for c in df_reclamos.columns if 'CIERRE' in c or 'SOLUCION' in c]
+    if col_cierre:
+        df_reclamos['ESTATUS'] = df_reclamos[col_cierre[0]].apply(lambda x: 'CERRADO' if pd.notnull(x) and str(x).strip() != '' else 'ABIERTO')
+    else:
+        df_reclamos['ESTATUS'] = 'PENDIENTE'
 
-    # GRÁFICOS
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("<div class='report-card'>", unsafe_allow_html=True)
-        st.write("📍 **Distribución por Zona**")
-        col_zona = [c for c in df_reclamos.columns if 'ZONA' in c or 'ESTADO' in c]
-        if col_zona:
-            fig = px.pie(df_reclamos, names=col_zona[0], hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-            st.plotly_chart(fig, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+    tickets_abiertos = df_reclamos[df_reclamos['ESTATUS'] == 'ABIERTO']
+    tickets_cerrados = df_reclamos[df_reclamos['ESTATUS'] == 'CERRADO']
 
-    with c2:
-        st.markdown("<div class='report-card'>", unsafe_allow_html=True)
-        st.write("🛠️ **Tipos de Falla más Frecuentes**")
-        col_tipo = [c for c in df_fallas.columns if 'TIPO' in c]
-        if col_tipo:
-            data_bar = df_fallas[col_tipo[0]].value_counts().reset_index()
-            fig_bar = px.bar(data_bar, x=col_tipo[0], y='count', color=col_tipo[0], template="plotly_white")
-            st.plotly_chart(fig_bar, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # REPORTES
-    st.subheader("📝 Entregables Automáticos")
-    t1, t2 = st.tabs(["📱 WhatsApp", "📥 Exportar"])
+    # 2. ANÁLISIS DE DISPONIBILIDAD (Estimación basada en fallas)
+    total_fallas_internas = len(df_fallas)
+    total_fallas_isp = len(df_isp) if df_isp is not None else 0
+    total_eventos = total_fallas_internas + total_fallas_isp
     
-    with t1:
-        msg = f"*MERU-NETWORKS: REPORTE NOC {periodo_reporte.upper()}*\n\n" \
-              f"📊 *Métricas:*\n" \
-              f"• Reclamos: {len(df_reclamos)}\n" \
-              f"• Fallas: {len(df_fallas)}\n" \
-              f"• ISP: {n_isp}\n\n" \
-              f"Generado automáticamente por sistema Meru-App."
-        st.text_area("Copia el reporte:", msg, height=150)
+    # Cálculo ficticio de disponibilidad (ejemplo: basado en horas del mes)
+    horas_mes = 720
+    # Intentar extraer duración si existe columna DURACIÓN
+    col_duracion = [c for c in df_fallas.columns if 'DURACI' in c]
+    # (Aquí podrías sumar las duraciones reales si el formato es HH:MM:SS)
+    disponibilidad = 100 - (total_eventos * 0.15) # Factor de corrección simple para el demo
 
-    with t2:
+    # --- DASHBOARD ---
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Tickets Abiertos", len(tickets_abiertos), delta_color="inverse")
+    m2.metric("Tickets Cerrados", len(tickets_cerrados))
+    m3.metric("Fallas ISP", total_fallas_isp)
+    m4.metric("Disponibilidad Red", f"{disponibilidad:.2f}%")
+
+    st.markdown("### 📋 Gestor de Tickets Recientes")
+    st.dataframe(df_reclamos[['ZONA', 'NOMBRE DE ABONADO', 'TIPO DE RECLAMO', 'ESTATUS']].head(10), use_container_width=True)
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        fig_pie = px.sunburst(df_reclamos, path=['ESTATUS', 'TIPO DE RECLAMO'], title="Estructura de Casos")
+        st.plotly_chart(fig_pie, use_container_width=True)
+    
+    with col_b:
+        # Análisis de Fallas Internas por Tipo
+        col_t_falla = [c for c in df_fallas.columns if 'TIPO' in c]
+        if col_t_falla:
+            fig_bar = px.bar(df_fallas[col_t_falla[0]].value_counts(), title="Tipología de Fallas Internas", labels={'value':'Cantidad', 'index':'Falla'})
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+    # --- GENERADOR DE REPORTES WHATSAPP ---
+    st.markdown("---")
+    st.subheader("📲 Generador de Reportes WhatsApp")
+    
+    # Detección de mes
+    mes_ref = "MARZO 2026" # Por defecto
+    col_fecha = [c for c in df_reclamos.columns if 'FECHA' in c]
+    if col_fecha:
+        try:
+            sample_date = pd.to_datetime(df_reclamos[col_fecha[0]].iloc[0])
+            meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+            mes_ref = f"{meses[sample_date.month-1].upper()} {sample_date.year}"
+        except: pass
+
+    reporte_wa = f"""*REPORTE NOC MERU-NETWORKS* 📡
+*Periodo:* {mes_ref}
+
+✅ *Disponibilidad de Red:* {disponibilidad:.2f}%
+⚠️ *Eventos ISP:* {total_fallas_isp}
+🔧 *Fallas Internas:* {total_fallas_internas}
+
+🎫 *Gestión de Tickets:*
+• Total Recibidos: {len(df_reclamos)}
+• Casos Cerrados: {len(tickets_cerrados)}
+• Casos en Proceso: {len(tickets_abiertos)}
+
+*Estatus Tickets Abiertos:*
+{chr(10).join([f"- {row['NOMBRE DE ABONADO']}: {row['TIPO DE RECLAMO']}" for _, row in tickets_abiertos.head(5).iterrows()])}
+
+_Generado por Sistema de Gestión de Operaciones Meru_"""
+
+    st.text_area("Copiar para WhatsApp:", reporte_wa, height=300)
+    
+    if st.button("📥 Descargar Reporte Consolidado (Excel)"):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_fallas.to_excel(writer, sheet_name='Fallas', index=False)
-            df_reclamos.to_excel(writer, sheet_name='Reclamos', index=False)
-        st.download_button("Descargar Excel", output.getvalue(), f"Reporte_NOC_{periodo_reporte}.xlsx")
+            df_reclamos.to_excel(writer, sheet_name='Tickets', index=False)
+            df_fallas.to_excel(writer, sheet_name='Fallas_Internas', index=False)
+            if df_isp is not None: df_isp.to_excel(writer, sheet_name='ISP', index=False)
+        st.download_button("Click para descargar", output.getvalue(), f"Reporte_NOC_{mes_ref}.xlsx")
 
 else:
-    st.info(f"💡 **Listo para trabajar:** Cargue los archivos de cualquier mes (Enero, Febrero, {periodo_reporte}, etc.) para generar el reporte automáticamente.")
+    # Pantalla de bienvenida
+    st.info("👋 Bienvenida/o. Por favor, cargue los 3 archivos CSV en el panel izquierdo para iniciar el análisis del mes.")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("### 1. Fallas Internas")
+        st.write("Analiza cortes de energía, problemas de RF y errores de configuración propios.")
+    with col2:
+        st.markdown("### 2. Reporte ISP")
+        st.write("Registra eventos de Sun Outage, Rain Fade y mantenimientos del proveedor satelital.")
+        st.markdown("### 2. Reporte ISP")
+        st.write("Registra eventos de Sun Outage, Rain Fade y mantenimientos del proveedor satelital.")
+    with col3:
+        st.markdown("### 3. Reclamos")
+        st.write("Gestor de tickets de abonados para medir el SLA de atención final.")
