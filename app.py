@@ -1,182 +1,112 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
-import time
+import streamlit.components.v1 as components
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# 1. Configuración de la página (Ancho completo y título en la pestaña)
 st.set_page_config(
-    page_title="Meru Networks | Global NOC",
-    page_icon="🌐",
+    page_title="Meru Networks - Executive Suite",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# --- DISEÑO DE INTERFAZ (CSS PERSONALIZADO) ---
-# Se corrigió 'unsafe_allow_stdio' por 'unsafe_allow_html'
+# 2. Inyectar CSS para quitar los márgenes por defecto de Streamlit
 st.markdown("""
-<style>
-    /* Estilo General Dark Mode */
-    .main {
-        background-color: #0b0e14;
-        color: #e6edf3;
-    }
-    
-    /* Tarjetas de Métricas Estilizadas */
-    [data-testid="stMetricValue"] {
-        font-size: 1.8rem !important;
-        font-weight: 700 !important;
-        color: #58a6ff !important;
-    }
-    
-    div[data-testid="stMetric"] {
-        background: rgba(22, 27, 34, 0.6);
-        border: 1px solid #30363d;
-        padding: 15px 20px;
-        border-radius: 12px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        transition: transform 0.3s ease;
-    }
-    
-    div[data-testid="stMetric"]:hover {
-        transform: translateY(-5px);
-        border-color: #58a6ff;
-    }
-
-    /* Contenedores de Gráficos */
-    .chart-container {
-        background: #161b22;
-        padding: 20px;
-        border-radius: 16px;
-        border: 1px solid #30363d;
-        margin-bottom: 20px;
-    }
-
-    /* Títulos y Subtítulos */
-    h1, h2, h3 {
-        font-family: 'Inter', sans-serif;
-        letter-spacing: -0.5px;
-    }
-    
-    .status-indicator {
-        display: inline-block;
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background-color: #238636;
-        margin-right: 8px;
-        box-shadow: 0 0 10px #238636;
-    }
-
-    /* Personalización de barra lateral y otros elementos */
-    .stAppHeader { background: rgba(0,0,0,0); }
-    
-</style>
+    <style>
+        .block-container {
+            padding-top: 0rem;
+            padding-bottom: 0rem;
+            padding-left: 0rem;
+            padding-right: 0rem;
+        }
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        #MainMenu {visibility: hidden;}
+    </style>
 """, unsafe_allow_html=True)
 
-# --- GENERACIÓN DE DATOS (MOCK DATA) ---
-def load_data():
-    chart_data = pd.DataFrame(
-        np.random.randn(20, 3),
-        columns=['Tráfico Int', 'Tráfico Ext', 'Latencia']
-    )
-    return chart_data
+# 3. Tu código HTML Premium (El que diseñamos anteriormente)
+# Nota: He pegado el código aquí dentro de una variable multilínea
+html_code = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; margin: 0; }
+        .glass-panel { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); border: 1px solid rgba(226, 232, 240, 0.8); }
+        .sidebar-link { transition: all 0.2s ease; cursor: pointer; }
+        .sidebar-link:hover { background: rgba(59, 130, 246, 0.1); color: #2563eb; }
+        .active-link { background: #2563eb; color: white !important; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+    <!-- Aquí va todo el contenido del <body> que generamos en el paso anterior -->
+    <!-- (Por brevedad, asegúrate de que el contenido del body sea el mismo del artefacto anterior) -->
+    
+    <aside class="w-64 glass-panel h-full flex flex-col p-6 z-20 shadow-xl">
+        <div class="mb-10 flex items-center gap-3">
+            <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">M</div>
+            <h1 class="text-lg font-bold text-slate-800 tracking-tight">MERU <span class="text-blue-600">NOC</span></h1>
+        </div>
+        <nav class="space-y-1 flex-grow">
+            <div onclick="parent.window.location.reload()" class="sidebar-link active-link flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold">Dashboard</div>
+            <div class="sidebar-link text-slate-600 flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold">Gestión</div>
+        </nav>
+    </aside>
 
-data = load_data()
-
-# --- HEADER PRINCIPAL ---
-col_logo, col_info = st.columns([3, 1])
-
-with col_logo:
-    st.markdown("""
-        <div style="display: flex; align-items: center;">
-            <h1 style="margin: 0; font-size: 2.5rem; color: #ffffff;">MERU <span style="color: #58a6ff;">NETWORKS</span></h1>
-            <div style="margin-left: 20px; padding: 5px 15px; background: rgba(35, 134, 54, 0.2); border: 1px solid #238636; border-radius: 20px;">
-                <span class="status-indicator"></span><span style="color: #3fb950; font-weight: 500; font-size: 0.9rem;">SISTEMAS OPERATIVOS</span>
+    <main class="flex-grow p-8 overflow-y-auto bg-slate-50">
+        <header class="mb-8">
+            <h2 class="text-3xl font-black text-slate-900">Resumen Ejecutivo</h2>
+            <p class="text-slate-500">Visualización de datos Meru Networks</p>
+        </header>
+        
+        <div class="grid grid-cols-3 gap-6 mb-8">
+            <div class="glass-panel p-6 rounded-2xl">
+                <p class="text-xs font-bold text-slate-400 uppercase">Tráfico Total</p>
+                <h4 class="text-2xl font-black">1.2 TB</h4>
+            </div>
+            <div class="glass-panel p-6 rounded-2xl">
+                <p class="text-xs font-bold text-slate-400 uppercase">Uptime</p>
+                <h4 class="text-2xl font-black">99.9%</h4>
+            </div>
+            <div class="glass-panel p-6 rounded-2xl">
+                <p class="text-xs font-bold text-slate-400 uppercase">Eb/No</p>
+                <h4 class="text-2xl font-black text-blue-600">14.2</h4>
             </div>
         </div>
-        <p style="color: #8b949e; margin-top: 10px;">Global Network Operations Center | Real-Time Monitoring</p>
-    """, unsafe_allow_html=True)
 
-with col_info:
-    st.markdown(f"""
-        <div style="text-align: right; color: #8b949e; font-family: monospace;">
-            ID SESIÓN: {hex(int(time.time())).upper()}<br>
-            TIMESTAMP: {datetime.now().strftime('%H:%M:%S')}<br>
-            REGIÓN: LATAM-HQ
+        <div class="glass-panel p-8 rounded-[2rem] h-96">
+             <canvas id="chartStreamlit"></canvas>
         </div>
-    """, unsafe_allow_html=True)
+    </main>
 
-st.divider()
+    <script>
+        const ctx = document.getElementById('chartStreamlit').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['01', '05', '10', '15', '20', '25', '30'],
+                datasets: [{
+                    label: 'Rendimiento Eb/No',
+                    data: [12, 14, 13.5, 15, 14.2, 14.8, 14.2],
+                    borderColor: '#2563eb',
+                    tension: 0.4,
+                    fill: true,
+                    backgroundColor: 'rgba(37, 99, 235, 0.05)'
+                }]
+            },
+            options: { maintainAspectRatio: false }
+        });
+    </script>
+</body>
+</html>
+"""
 
-# --- FILA 1: KPIs ---
-kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-
-with kpi1:
-    st.metric("UPTIME ANUAL", "99.998%", "0.001%")
-with kpi2:
-    st.metric("ANCHO DE BANDA", "4.2 Tbps", "+12%", delta_color="normal")
-with kpi3:
-    st.metric("LATENCIA MEDIA", "14.2 ms", "-2.1 ms", delta_color="inverse")
-with kpi4:
-    st.metric("AMENAZAS BLOCK", "1,242", "Normal")
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# --- FILA 2: GRÁFICOS PRINCIPALES ---
-c1, c2 = st.columns([2, 1])
-
-with c1:
-    st.markdown("### Rendimiento de Carga (Global)")
-    fig = px.area(data, template="plotly_dark", color_discrete_sequence=['#58a6ff', '#1f6feb', '#238636'])
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=0, r=0, t=20, b=0),
-        xaxis=dict(showgrid=False),
-        yaxis=dict(showgrid=True, gridcolor='#30363d')
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-with c2:
-    st.markdown("### Estado de Nodos")
-    labels = ['Activos', 'Mantenimiento', 'Críticos']
-    values = [85, 12, 3]
-    fig_pie = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.6)])
-    fig_pie.update_layout(
-        template="plotly_dark",
-        margin=dict(l=0, r=0, t=0, b=0),
-        paper_bgcolor='rgba(0,0,0,0)',
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
-    )
-    fig_pie.update_traces(marker=dict(colors=['#238636', '#d29922', '#f85149']))
-    st.plotly_chart(fig_pie, use_container_width=True)
-
-# --- FILA 3: TABLA DE EVENTOS ---
-st.markdown("### Log de Eventos en Tiempo Real")
-event_data = pd.DataFrame([
-    {"ID": "ERR-90", "Timestamp": "14:02:11", "Nodo": "AR-BUE-01", "Evento": "BGP Flapping", "Prioridad": "ALTA"},
-    {"ID": "INF-22", "Timestamp": "14:01:45", "Nodo": "BR-SAO-02", "Evento": "Backup Sync Complete", "Prioridad": "BAJA"},
-    {"ID": "WRN-04", "Timestamp": "13:59:02", "Nodo": "CL-SAN-01", "Evento": "Temp Threshold Exceeded", "Prioridad": "MEDIA"},
-    {"ID": "INF-21", "Timestamp": "13:55:20", "Nodo": "MX-CDX-04", "Evento": "User Auth Success", "Prioridad": "BAJA"}
-])
-
-def color_priority(val):
-    if val == 'ALTA': return 'color: #f85149'
-    if val == 'MEDIA': return 'color: #d29922'
-    return 'color: #3fb950'
-
-st.dataframe(
-  event_data.style.map(color_priority, subset=['Prioridad']),
-    use_container_width=True,
-    hide_index=True
-)
-
-# --- FOOTER ---
-st.markdown("""
-    <div style="text-align: center; color: #8b949e; padding: 40px 0;">
-        <small>© 2024 Meru Networks. Todos los derechos reservados. Confidencial.</small>
-    </div>
-""", unsafe_allow_html=True)
+# 4. Renderizar el HTML a pantalla completa
+components.html(html_code, height=1000, scrolling=True)
