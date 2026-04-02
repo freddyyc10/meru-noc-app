@@ -3,10 +3,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
-import time
 import random
 
-# Configuración de página con estilo oscuro
+# 1. Configuración de página (Debe ser el primer comando de Streamlit)
 st.set_page_config(
     page_title="Meru Networks | Global NOC",
     page_icon="🌐",
@@ -14,21 +13,16 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Estilo CSS personalizado para emular una interfaz de monitoreo profesional
+# 2. Inyección de CSS corregida
+# Nota: Se usa unsafe_allow_html=True (stdio era un error de sintaxis)
 st.markdown("""
-    <style>
-    .main {
-        background-color: #0e1117;
-    }
+<style>
+    .main { background-color: #0e1117; }
     .stMetric {
-        background-color: #161b22;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #30363d;
-    }
-    [data-testid="stMetricValue"] {
-        color: #58a6ff;
-        font-family: 'Courier New', Courier, monospace;
+        background-color: #161b22 !important;
+        padding: 15px !important;
+        border-radius: 10px !important;
+        border: 1px solid #30363d !important;
     }
     .status-header {
         color: #8b949e;
@@ -37,87 +31,60 @@ st.markdown("""
         letter-spacing: 2px;
         margin-bottom: 20px;
     }
-    </style>
-    """, unsafe_allow_stdio=True)
+</style>
+""", unsafe_allow_html=True)
 
-# --- GENERACIÓN DE DATOS SIMULADOS ---
+# 3. Funciones de Datos
 def get_network_data():
-    # Simulación de tráfico en Gbps (últimas 24 horas)
     df = pd.DataFrame({
-        'Hora': pd.date_range(start='2024-05-20', periods=24, freq='H'),
+        'Hora': pd.date_range(start=datetime.now().strftime("%Y-%m-%d"), periods=24, freq='h'),
         'Trafico_Gbps': [random.uniform(2, 8) for _ in range(24)],
         'Latencia_ms': [random.uniform(10, 25) for _ in range(24)]
     })
     return df
 
-# --- HEADER DEL DASHBOARD ---
+# 4. Layout Superior
 col_h1, col_h2 = st.columns([2, 1])
 
 with col_h1:
     st.markdown("# 🌐 MERU **NETWORKS**")
-    st.markdown("<p class='status-header'>Global Network Operations Center • Live Stream</p>", unsafe_allow_stdio=True)
+    st.markdown("<p class='status-header'>Global Network Operations Center • Live Stream</p>", unsafe_allow_html=True)
 
 with col_h2:
-    st.write("")
-    now = datetime.now().strftime("%d %B %Y | %H:%M:%S")
-    st.metric("SISTEMA UTC", now, delta="ESTABLE", delta_color="normal")
+    now_str = datetime.now().strftime("%d %B %Y | %H:%M:%S")
+    st.metric("SISTEMA UTC", now_str, delta="ESTABLE")
 
 st.divider()
 
-# --- KPIs PRINCIPALES ---
-kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+# 5. KPIs
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("Uptime Global", "99.99%", "0.01%")
+k2.metric("Tráfico Actual", "5.4 Gbps", "-0.2")
+k3.metric("Nodos Activos", "1,248", "12")
+k4.metric("Alertas", "0", "Normal")
 
-with kpi1:
-    st.metric(label="Uptime Global", value="99.998%", delta="0.001%")
-with kpi2:
-    st.metric(label="Ancho de Banda Actual", value="5.4 Gbps", delta="-0.2 Gbps")
-with kpi3:
-    st.metric(label="Dispositivos Activos", value="1,248", delta="12")
-with kpi4:
-    st.metric(label="Alertas Críticas", value="0", delta="Normal", delta_color="inverse")
-
-# --- GRÁFICOS INTERACTIVOS ---
+# 6. Gráficos
 df_data = get_network_data()
+c1, c2 = st.columns([2, 1])
 
-col_chart1, col_chart2 = st.columns([2, 1])
-
-with col_chart1:
-    st.subheader("Rendimiento de Red (Throughput)")
-    fig_line = px.line(df_data, x='Hora', y='Trafico_Gbps', 
-                      template="plotly_dark",
-                      color_discrete_sequence=['#58a6ff'])
-    fig_line.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        margin=dict(l=0, r=0, t=20, b=0)
-    )
+with c1:
+    st.subheader("Rendimiento de Red")
+    fig_line = px.line(df_data, x='Hora', y='Trafico_Gbps', template="plotly_dark")
+    fig_line.update_traces(line_color='#58a6ff')
+    fig_line.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
     st.plotly_chart(fig_line, use_container_width=True)
 
-with col_chart2:
-    st.subheader("Distribución de Carga")
-    labels = ['WLAN-Internal', 'WLAN-Guest', 'VPN-Remote', 'DMZ']
-    values = [450, 250, 150, 100]
-    fig_pie = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.6)])
-    fig_pie.update_layout(
-        template="plotly_dark",
-        margin=dict(l=0, r=0, t=20, b=0),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
-    )
+with c2:
+    st.subheader("Segmentación")
+    fig_pie = go.Figure(data=[go.Pie(labels=['Int', 'Ext', 'VPN'], values=[450, 250, 150], hole=.5)])
+    fig_pie.update_layout(template="plotly_dark", margin=dict(t=0, b=0, l=0, r=0))
     st.plotly_chart(fig_pie, use_container_width=True)
 
-# --- TABLA DE LOGS / INVENTARIO ---
-st.subheader("Consola de Eventos en Tiempo Real")
-
-eventos = [
-    {"Hora": "14:05:22", "Dispositivo": "CORE-RT-01", "Evento": "BGP Session Re-established", "Status": "INFO"},
-    {"Hora": "14:02:10", "Dispositivo": "DIST-SW-04", "Evento": "Port Te1/0/1 state changed to UP", "Status": "SUCCESS"},
-    {"Hora": "13:58:45", "Dispositivo": "AP-OFFICE-09", "Evento": "Channel interference detected (5GHz)", "Status": "WARN"},
-    {"Hora": "13:45:01", "Dispositivo": "EDGE-FW-01", "Evento": "DDoS Mitigation module active", "Status": "SECURITY"},
-]
-
-st.table(pd.DataFrame(eventos))
-
-# Simulación de actualización (Opcional para local)
-# st.empty()
-# time.sleep(1)
-# st.rerun()
+# 7. Tabla de Logs
+st.subheader("Eventos de Red")
+logs = pd.DataFrame([
+    {"Time": "14:05", "Device": "CORE-01", "Msg": "BGP Up", "Type": "INFO"},
+    {"Time": "14:02", "Device": "SW-04", "Msg": "Port Up", "Type": "SUCCESS"},
+    {"Time": "13:58", "Device": "AP-09", "Msg": "Interference", "Type": "WARN"}
+])
+st.dataframe(logs, use_container_width=True)
