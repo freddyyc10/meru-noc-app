@@ -1,4 +1,4 @@
-mport React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   AreaChart, Area 
