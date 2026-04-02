@@ -169,7 +169,7 @@ def color_priority(val):
     return 'color: #3fb950'
 
 st.dataframe(
-    event_data.style.applymap(color_priority, subset=['Prioridad']),
+  event_data.style.map(color_priority, subset=['Prioridad']),
     use_container_width=True,
     hide_index=True
 )
