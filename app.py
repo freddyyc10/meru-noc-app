@@ -1,252 +1,222 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  Satellite, 
-  Activity, 
-  AlertTriangle, 
-  Zap, 
-  ShieldCheck, 
-  Terminal, 
-  SignalHigh,
-  Database,
-  Wifi,
-  Search
+  Satellite, Activity, AlertTriangle, Zap, ShieldCheck, 
+  Terminal, SignalHigh, Database, Wifi, Search, BarChart3
 } from 'lucide-react';
 import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer 
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar
 } from 'recharts';
 
-// Datos de ejemplo para la gráfica
-const MOCK_TIME_SERIES = [
-  { date: '01 Mar', ebno: 15.2 },
-  { date: '05 Mar', ebno: 14.8 },
-  { date: '10 Mar', ebno: 13.1 },
-  { date: '15 Mar', ebno: 15.1 },
-  { date: '20 Mar', ebno: 14.9 },
-  { date: '25 Mar', ebno: 15.5 },
-  { date: '31 Mar', ebno: 15.3 },
+// Datos simulados basados en reportes de red
+const PERFORMANCE_DATA = [
+  { time: '00:00', ebno: 14.2, traffic: 400 },
+  { time: '04:00', ebno: 14.8, traffic: 300 },
+  { time: '08:00', ebno: 15.1, traffic: 800 },
+  { time: '12:00', ebno: 13.9, traffic: 1200 },
+  { time: '16:00', ebno: 14.5, traffic: 950 },
+  { time: '20:00', ebno: 15.3, traffic: 600 },
+  { time: '23:59', ebno: 15.0, traffic: 450 },
 ];
 
-const NODE_DATA = [
-  { id: 'DC72', name: 'WARAIRAREPANO', type: 'HUB-CORE', status: 'online', fl: 15.5, rl: 9.8, traffic: '1.2 TB' },
-  { id: 'MER00', name: 'OBSERVATORIO', type: 'REMOTE', status: 'online', fl: 14.9, rl: 9.2, traffic: '450 GB' },
-  { id: 'ZUL36', name: 'CABIMAS', type: 'REMOTE', status: 'warning', fl: 13.8, rl: 8.5, traffic: '320 GB' },
-  { id: 'AMA05', name: 'CAICET', type: 'REMOTE', status: 'online', fl: 15.1, rl: 9.4, traffic: '180 GB' },
-  { id: 'GUA19', name: 'HCHF', type: 'REMOTE', status: 'error', fl: 0.0, rl: 0.0, traffic: '12 GB' },
-  { id: 'FAL16', name: 'MORUY', type: 'REMOTE', status: 'online', fl: 14.7, rl: 9.1, traffic: '95 GB' },
+const NODES = [
+  { id: 'DC72', name: 'WARAIRAREPANO', type: 'HUB', status: 'online', fl: 15.5, rl: 9.8, load: 75 },
+  { id: 'MER00', name: 'OBSERVATORIO', type: 'REMOTE', status: 'online', fl: 14.9, rl: 9.2, load: 30 },
+  { id: 'ZUL36', name: 'CABIMAS', type: 'REMOTE', status: 'warning', fl: 11.2, rl: 7.1, load: 85 },
+  { id: 'AMA05', name: 'CAICET', type: 'REMOTE', status: 'online', fl: 15.1, rl: 9.4, load: 15 },
+  { id: 'GUA19', name: 'HCHF', type: 'REMOTE', status: 'error', fl: 0.0, rl: 0.0, load: 0 },
+  { id: 'FAL16', name: 'MORUY', type: 'REMOTE', status: 'online', fl: 14.7, rl: 9.1, load: 45 },
+  { id: 'ARA16', name: 'VALLE MORIN', type: 'REMOTE', status: 'online', fl: 14.3, rl: 9.5, load: 22 },
 ];
 
-const Badge = ({ status }) => {
-  const styles = {
+const StatusBadge = ({ status }) => {
+  const config = {
     online: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
     warning: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     error: "bg-rose-500/10 text-rose-400 border-rose-500/20"
   };
   return (
-    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-tighter border ${styles[status]}`}>
+    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${config[status]}`}>
       {status}
     </span>
   );
 };
 
-const StatCard = ({ title, value, unit, trend, icon: Icon, color }) => (
-  <div className="bg-[#0d1117] border border-slate-800 p-4 rounded-xl shadow-xl hover:border-slate-700 transition-all">
-    <div className="flex justify-between items-start mb-3">
+const MetricCard = ({ title, value, unit, icon: Icon, color }) => (
+  <div className="bg-[#0d1117] border border-slate-800 p-4 rounded-xl hover:border-slate-700 transition-all">
+    <div className="flex justify-between items-start mb-2">
       <div className={`p-2 rounded-lg bg-${color}-500/10`}>
         <Icon className={`w-5 h-5 text-${color}-400`} />
       </div>
-      {trend && (
-        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${trend > 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
-          {trend > 0 ? '+' : ''}{trend}%
-        </span>
-      )}
     </div>
-    <div className="text-slate-500 text-[10px] uppercase font-bold tracking-widest mb-1">{title}</div>
-    <div className="flex items-baseline gap-1">
+    <div className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">{title}</div>
+    <div className="flex items-baseline gap-1 mt-1">
       <span className="text-2xl font-black text-white tracking-tighter">{value}</span>
-      <span className="text-slate-500 text-xs font-medium">{unit}</span>
+      <span className="text-slate-500 text-xs">{unit}</span>
     </div>
   </div>
 );
 
-const TerminalLog = () => {
+export default function App() {
+  const [search, setSearch] = useState("");
   const [logs, setLogs] = useState([
-    "Initializing Meru Intelligence Layer...",
-    "VNO Segment 13: All carriers nominal.",
-    "Loading metrics for March 2026..."
+    "Sincronizando con satélite Star One D2...",
+    "VNO Meru-Networks: 142 terminales detectadas.",
+    "Monitoreo de Eb/No activo en tiempo real."
   ]);
 
   useEffect(() => {
-    const messages = [
-      "ZUL36: Eb/No fluctuations detected.",
-      "GUA19: Heartbeat timeout. Alert triggered.",
-      "Traffic: Peak at DC72 (4.2 Gbps).",
-      "System: Auto-backup successful."
-    ];
-    const interval = setInterval(() => {
-      setLogs(prev => [...prev.slice(-4), `> ${messages[Math.floor(Math.random() * messages.length)]}`]);
-    }, 4000);
-    return () => clearInterval(interval);
+    const timer = setInterval(() => {
+      const msgs = [
+        "ZUL36: Eb/No crítico detectado (11.2 dB)",
+        "Respaldo automático completado en MER00",
+        "Tráfico inusual detectado en HUB-DC72",
+        "GUA19: Reintentando handshake..."
+      ];
+      setLogs(prev => [msgs[Math.floor(Math.random() * msgs.length)], ...prev.slice(0, 4)]);
+    }, 5000);
+    return () => clearInterval(timer);
   }, []);
 
-  return (
-    <div className="bg-black border border-slate-800 rounded-xl overflow-hidden font-mono h-full">
-      <div className="bg-slate-900 px-3 py-1.5 border-b border-slate-800 flex items-center gap-2">
-        <Terminal className="w-3 h-3 text-sky-400" />
-        <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">NOC_Live</span>
-      </div>
-      <div className="p-3 text-[10px] space-y-1 text-sky-400/80">
-        {logs.map((log, i) => (
-          <div key={i} className="flex gap-2">
-            <span className="text-slate-600">&gt;</span>
-            <span>{log}</span>
-          </div>
-        ))}
-      </div>
-    </div>
+  const filteredNodes = useMemo(() => 
+    NODES.filter(n => n.name.toLowerCase().includes(search.toLowerCase()) || n.id.toLowerCase().includes(search.toLowerCase())),
+    [search]
   );
-};
-
-export default function App() {
-  const [searchTerm, setSearchTerm] = useState("");
-
-  const filteredNodes = useMemo(() => {
-    return NODE_DATA.filter(n => 
-      n.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      n.id.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [searchTerm]);
 
   return (
-    <div className="min-h-screen bg-[#010409] text-slate-300 font-sans p-4 md:p-8">
+    <div className="min-h-screen bg-[#010409] text-slate-300 p-4 font-sans">
       {/* Header */}
-      <header className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+      <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center mb-8 gap-4 border-b border-slate-800 pb-6">
         <div className="flex items-center gap-3">
-          <div className="bg-sky-500 p-2 rounded-xl">
+          <div className="bg-sky-500 p-2 rounded-lg shadow-lg shadow-sky-500/20">
             <Satellite className="text-slate-900 w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-black tracking-tighter text-white italic">MERU NETWORKS</h1>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.3em]">NOC Dashboard v2.5</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-2 bg-emerald-500/5 border border-emerald-500/20 rounded-full px-4 py-1.5">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Sistemas Operativos</span>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard title="Uptime Red" value="97.8" unit="%" trend={0.4} icon={ShieldCheck} color="emerald" />
-          <StatCard title="Promedio Eb/No" value="15.1" unit="dB" trend={-1.2} icon={SignalHigh} color="sky" />
-          <StatCard title="Tráfico Total" value="2.84" unit="TB" trend={12.5} icon={Zap} color="amber" />
-          <StatCard title="Nodos Activos" value="142" unit="" trend={2} icon={Wifi} color="indigo" />
-        </div>
-
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Chart */}
-          <div className="lg:col-span-8 bg-[#0d1117] border border-slate-800 rounded-2xl p-6 shadow-xl">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-widest">
-                <Activity className="w-4 h-4 text-sky-400" /> Rendimiento de Red
-              </h3>
-            </div>
-            <div className="h-[300px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={MOCK_TIME_SERIES}>
-                  <defs>
-                    <linearGradient id="colorEbNo" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                  <XAxis dataKey="date" stroke="#475569" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#475569" fontSize={10} tickLine={false} axisLine={false} domain={[12, 17]} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#0d1117', border: '1px solid #334155', borderRadius: '8px', fontSize: '12px' }}
-                  />
-                  <Area type="monotone" dataKey="ebno" stroke="#0ea5e9" strokeWidth={3} fillOpacity={1} fill="url(#colorEbNo)" />
-                </AreaChart>
-              </ResponsiveContainer>
+            <h1 className="text-xl font-black tracking-tighter text-white italic">MERU NOC</h1>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Global Operations Center</p>
             </div>
           </div>
+        </div>
+        
+        <div className="relative w-full md:w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+          <input 
+            type="text"
+            placeholder="Buscar terminal..."
+            className="w-full bg-[#0d1117] border border-slate-800 rounded-lg py-2 pl-10 pr-4 text-xs focus:outline-none focus:border-sky-500"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
 
-          {/* Sidebar */}
-          <div className="lg:col-span-4 space-y-6">
-            <div className="h-48">
-              <TerminalLog />
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* KPI Grid */}
+        <div className="lg:col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricCard title="Disponibilidad" value="99.2" unit="%" icon={ShieldCheck} color="emerald" />
+          <MetricCard title="Promedio Eb/No" value="14.6" unit="dB" icon={SignalHigh} color="sky" />
+          <MetricCard title="Latencia" value="580" unit="ms" icon={Activity} color="amber" />
+          <MetricCard title="Ancho de Banda" value="1.2" unit="Gbps" icon={Zap} color="indigo" />
+        </div>
+
+        {/* Chart Section */}
+        <div className="lg:col-span-8 bg-[#0d1117] border border-slate-800 rounded-2xl p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-sky-400" /> Rendimiento de Enlace (24h)
+            </h3>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={PERFORMANCE_DATA}>
+                <defs>
+                  <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis dataKey="time" stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
+                <YAxis stroke="#475569" fontSize={10} axisLine={false} tickLine={false} domain={[10, 18]} />
+                <Tooltip contentStyle={{backgroundColor: '#0d1117', border: '1px solid #334155'}} />
+                <Area type="monotone" dataKey="ebno" stroke="#0ea5e9" strokeWidth={2} fill="url(#grad)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Live Terminal */}
+        <div className="lg:col-span-4 flex flex-col gap-6">
+          <div className="bg-black border border-slate-800 rounded-2xl p-4 font-mono text-[10px] flex-1">
+            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-slate-900">
+              <Terminal className="w-3 h-3 text-emerald-500" />
+              <span className="text-slate-500 uppercase font-bold tracking-tighter">Live_Console_v2</span>
             </div>
-            <div className="bg-[#0d1117] border border-slate-800 rounded-2xl p-5 shadow-xl">
-              <h3 className="text-xs font-bold text-white uppercase tracking-widest mb-4 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-500" /> Alertas Críticas
-              </h3>
-              <div className="space-y-3">
-                <div className="p-3 bg-rose-500/5 border border-rose-500/10 rounded-xl">
-                  <div className="font-bold text-rose-400 text-[11px]">OUTAGE: GUA19_HCHF</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Sin respuesta desde las 02:15 UTC.</div>
+            <div className="space-y-2">
+              {logs.map((log, i) => (
+                <div key={i} className="flex gap-2">
+                  <span className="text-emerald-500/50">[{new Date().toLocaleTimeString()}]</span>
+                  <span className={i === 0 ? "text-emerald-400" : "text-slate-400"}>{log}</span>
                 </div>
-                <div className="p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl">
-                  <div className="font-bold text-amber-400 text-[11px]">WARNING: ZUL36_CABIMAS</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">Eb/No por debajo del umbral nominal.</div>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
-
-          {/* Table */}
-          <div className="lg:col-span-12 bg-[#0d1117] border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="p-5 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-900/20">
-              <h3 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2">
-                <Database className="w-4 h-4 text-emerald-400" /> Inventario de Nodos
-              </h3>
-              <div className="relative w-full sm:w-64">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
-                <input 
-                  type="text" 
-                  placeholder="Buscar nodo o ID..." 
-                  className="bg-black border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-[11px] w-full focus:outline-none focus:border-sky-500 transition-colors"
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
+          
+          <div className="bg-rose-500/5 border border-rose-500/20 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="w-4 h-4 text-rose-500" />
+              <span className="text-xs font-bold text-rose-500 uppercase">Alertas Activas</span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-slate-900/40 text-[10px] font-black text-slate-500 uppercase tracking-[0.15em] border-b border-slate-800">
-                    <th className="px-6 py-4">ID / Nombre</th>
-                    <th className="px-6 py-4">Estado</th>
-                    <th className="px-6 py-4 text-center">FL Eb/No</th>
-                    <th className="px-6 py-4 text-center">RL Eb/No</th>
-                    <th className="px-6 py-4 text-right">Tráfico Total</th>
+            <p className="text-[11px] text-slate-400 italic">No se detectan fallos masivos. GUA19 requiere intervención técnica en sitio.</p>
+          </div>
+        </div>
+
+        {/* Inventory Table */}
+        <div className="lg:col-span-12 bg-[#0d1117] border border-slate-800 rounded-2xl overflow-hidden">
+          <div className="p-4 border-b border-slate-800 bg-slate-900/20 flex justify-between items-center">
+            <h3 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2">
+              <Database className="w-4 h-4 text-emerald-400" /> Estado por Terminal
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800 bg-black/20">
+                  <th className="px-6 py-4">Estación</th>
+                  <th className="px-6 py-4">Estado</th>
+                  <th className="px-6 py-4">Eb/No (FL)</th>
+                  <th className="px-6 py-4">Eb/No (RL)</th>
+                  <th className="px-6 py-4">Carga CPU</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {filteredNodes.map(node => (
+                  <tr key={node.id} className="hover:bg-slate-800/30 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="font-bold text-white text-xs">{node.id}_{node.name}</div>
+                      <div className="text-[9px] text-slate-500 font-mono">{node.type}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <StatusBadge status={node.status} />
+                    </td>
+                    <td className="px-6 py-4 font-mono text-xs">{node.fl > 0 ? `${node.fl} dB` : '--'}</td>
+                    <td className="px-6 py-4 font-mono text-xs">{node.rl > 0 ? `${node.rl} dB` : '--'}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden min-w-[60px]">
+                          <div 
+                            className={`h-full rounded-full ${node.load > 80 ? 'bg-rose-500' : 'bg-sky-500'}`} 
+                            style={{ width: `${node.load}%` }} 
+                          />
+                        </div>
+                        <span className="text-[10px] font-bold">{node.load}%</span>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {filteredNodes.map(node => (
-                    <tr key={node.id} className="hover:bg-slate-800/30 transition-colors group">
-                      <td className="px-6 py-4">
-                        <div className="font-bold text-white text-xs group-hover:text-sky-400 transition-colors">{node.id}_{node.name}</div>
-                        <div className="text-[9px] text-slate-500 font-mono uppercase mt-0.5">{node.type}</div>
-                      </td>
-                      <td className="px-6 py-4"><Badge status={node.status} /></td>
-                      <td className="px-6 py-4 text-center font-mono text-xs">{node.fl > 0 ? node.fl.toFixed(1) : '--'}</td>
-                      <td className="px-6 py-4 text-center font-mono text-xs">{node.rl > 0 ? node.rl.toFixed(1) : '--'}</td>
-                      <td className="px-6 py-4 text-right font-bold text-xs text-white/80">{node.traffic}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
