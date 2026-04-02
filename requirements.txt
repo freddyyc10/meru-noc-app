@@ -4,3 +4,4 @@ numpy
 requests
 streamlit-aggrid
 streamlit-echarts
+streamlit-option-menu
