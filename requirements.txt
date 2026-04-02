@@ -1,6 +1,4 @@
-pandas
-matplotlib
-seaborn
 streamlit
-openpyxl
-python-docx
+pandas
+plotly
+xlsxwriter
