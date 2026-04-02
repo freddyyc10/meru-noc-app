@@ -1,169 +1,180 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import requests
-import time
 import io
-from st_aggrid import AgGrid, GridOptionsBuilder
-from streamlit_echarts import st_echarts
+import time
+import requests
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Pt
+import openpyxl
 
-# --- Configuración de Entorno ---
-st.set_page_config(page_title="Meru NOC & Talent System", layout="wide")
+# --- Configuración ---
+st.set_page_config(page_title="Meru NOC - Reporte Mensual", layout="wide")
 
 # --- Constantes de IA ---
 MODEL_NAME = "gemini-2.5-flash-preview-09-2025"
-API_KEY = ""  # Se autogestiona en el entorno
+API_KEY = "" # Gestionado internamente
 ENDPOINT = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
 
-def call_gemini_ai(prompt, is_json=False):
-    """Lógica de IA con reintentos y soporte para JSON estructurado"""
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "systemInstruction": {"parts": [{"text": "Eres un analista experto. Si se te pide una tabla, devuelve los datos en formato CSV o lista clara."}]}
-    }
+def call_gemini_analysis(context_text):
+    """Analiza los datos de los CSV para generar el resumen ejecutivo del informe."""
+    prompt = f"""
+    Eres un analista de operaciones de red (NOC) para Meru-Networks. 
+    Analiza los siguientes datos de tráfico, fallas y reclamos del mes de marzo 2026:
+    {context_text}
     
-    if is_json:
-        payload["generationConfig"] = {"responseMimeType": "application/json"}
+    Proporciona un 'Resumen Ejecutivo' de 3 párrafos resaltando:
+    1. Disponibilidad general y eventos climáticos/astronómicos.
+    2. Resumen de tráfico (nodos más activos).
+    3. Eficiencia en la resolución de fallas y reclamos.
+    """
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    try:
+        response = requests.post(ENDPOINT, json=payload, timeout=30)
+        if response.status_code == 200:
+            return response.json()['candidates'][0]['content']['parts'][0]['text']
+    except:
+        return "Error al generar análisis automático. Por favor, revise los datos manualmente."
+    return "Análisis no disponible."
 
-    delays = [1, 2, 4, 8, 16]
-    for delay in delays:
-        try:
-            response = requests.post(ENDPOINT, json=payload, timeout=45)
-            if response.status_code == 200:
-                result = response.json()
-                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "")
-            if response.status_code in [429, 500, 503]:
-                time.sleep(delay)
-                continue
-            return None
-        except Exception:
-            time.sleep(delay)
-    return None
+# --- Procesamiento de Archivos ---
+def process_uploaded_files(files):
+    data_frames = {}
+    for file in files:
+        name = file.name.lower()
+        # Identificar archivos por palabras clave en el nombre
+        if "data usage" in name:
+            data_frames['uso'] = pd.read_csv(file, skiprows=3)
+        elif "statistics (43)" in name:
+            data_frames['octetos'] = pd.read_csv(file)
+        elif "statistics (42)" in name:
+            data_frames['ebno'] = pd.read_csv(file)
+        elif "isp" in name:
+            data_frames['fallas_isp'] = pd.read_csv(file, skiprows=3)
+        elif "reclamos" in name:
+            data_frames['reclamos'] = pd.read_csv(file, skiprows=3)
+        elif "internas" in name:
+            data_frames['fallas_internas'] = pd.read_csv(file, skiprows=3)
+    return data_frames
 
-# --- Funciones de Documentos (Word) ---
-def generate_word_report(df_list, titles, summary):
+# --- Generación de Documentos ---
+def create_excel_report(df_isp, df_reclamos, df_internas):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        if df_isp is not None: df_isp.to_excel(writer, sheet_name='REPORTE ISP', index=False)
+        if df_reclamos is not None: df_reclamos.to_excel(writer, sheet_name='REPORTE RECLAMOS', index=False)
+        if df_internas is not None: df_internas.to_excel(writer, sheet_name='FALLAS INTERNAS', index=False)
+    return output.getvalue()
+
+def create_word_report(summary, tables_dict):
     doc = Document()
-    doc.add_heading('Informe Estratégico NOC & Talent', 0)
+    style = doc.styles['Normal']
+    style.font.name = 'Arial'
+    style.font.size = Pt(11)
+
+    doc.add_heading('INFORME DE GESTIÓN MENSUAL: RED SATELITAL MERU', 0)
+    doc.add_paragraph("Periodo: Marzo 2026")
     
-    doc.add_heading('Resumen Ejecutivo de la IA', level=1)
+    doc.add_heading('1. RESUMEN EJECUTIVO (Analizado por IA)', level=1)
     doc.add_paragraph(summary)
-    
-    for df, title in zip(df_list, titles):
-        doc.add_heading(title, level=2)
-        table = doc.add_table(rows=1, cols=len(df.columns))
-        hdr_cells = table.rows[0].cells
-        for i, col in enumerate(df.columns):
-            hdr_cells[i].text = str(col)
-        
-        for index, row in df.iterrows():
-            row_cells = table.add_row().cells
-            for i, value in enumerate(row):
-                row_cells[i].text = str(value)
+
+    sections = {
+        'fallas_isp': '2. REPORTE DE FALLAS PROVEEDORES (ISP)',
+        'reclamos': '3. REPORTE DE ATENCIÓN DE RECLAMOS',
+        'fallas_internas': '4. REPORTE DE FALLAS INTERNAS'
+    }
+
+    for key, title in sections.items():
+        if key in tables_dict and tables_dict[key] is not None:
+            doc.add_heading(title, level=1)
+            df = tables_dict[key].dropna(how='all').head(15) # Limitar para el doc
+            table = doc.add_table(rows=1, cols=len(df.columns))
+            table.style = 'Table Grid'
+            hdr_cells = table.rows[0].cells
+            for i, col in enumerate(df.columns):
+                hdr_cells[i].text = str(col)
+            for _, row in df.iterrows():
+                row_cells = table.add_row().cells
+                for i, val in enumerate(row):
+                    row_cells[i].text = str(val)
     
     buffer = io.BytesIO()
     doc.save(buffer)
-    buffer.seek(0)
-    return buffer
+    return buffer.getvalue()
 
-# --- Datos de Simulación NOC ---
-def get_noc_metrics():
-    times = [f"{h}:00" for h in range(24)]
-    inbound = np.random.randint(400, 900, size=24).tolist()
-    outbound = np.random.randint(300, 700, size=24).tolist()
-    
-    tickets = pd.DataFrame({
-        "ID": ["T-101", "T-102", "T-103", "T-104"],
-        "Prioridad": ["Alta", "Crítica", "Media", "Baja"],
-        "Asunto": ["Caída de Enlace Fibra", "Latencia en Core", "Configuración BGP", "Update Firmware"],
-        "Estado": ["Abierto", "En Progreso", "Pendiente", "Cerrado"]
-    })
-    return times, inbound, outbound, tickets
+# --- UI Principal ---
+st.title("📡 Gestor de Informes Mensuales NOC")
+st.markdown("### Importación de Datos CSV para Análisis de Marzo 2026")
 
-# --- UI - Sidebar ---
-st.sidebar.title("📡 Meru System")
-menu = st.sidebar.radio("Navegación Principal", ["Gestión NOC", "Talento & CVs", "Generador de Informes"])
+with st.sidebar:
+    st.header("Configuración")
+    uploaded_files = st.file_uploader("Cargar archivos CSV (Uso, EbNo, ISP, Reclamos, Internas)", accept_multiple_files=True)
+    st.info("Sube los archivos CSV exportados para que la IA los analice.")
 
-# --- Pantalla 1: Gestión NOC ---
-if menu == "Gestión NOC":
-    st.header("📊 Centro de Operaciones de Red")
-    times, inbound, outbound, tickets_df = get_noc_metrics()
+if uploaded_files:
+    dfs = process_uploaded_files(uploaded_files)
     
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("Tráfico de Red en Tiempo Real (Gbps)")
-        options = {
-            "tooltip": {"trigger": "axis"},
-            "legend": {"data": ["Inbound", "Outbound"]},
-            "xAxis": {"type": "category", "data": times},
-            "yAxis": {"type": "value"},
-            "series": [
-                {"name": "Inbound", "type": "line", "data": inbound, "smooth": True},
-                {"name": "Outbound", "type": "line", "data": outbound, "smooth": True}
-            ]
-        }
-        st_echarts(options=options, height="400px")
-    
-    with col2:
-        st.subheader("Gestión de Tickets")
-        AgGrid(tickets_df, fit_columns_on_grid_load=True, theme="streamlit")
-        if st.button("Analizar carga de tickets con IA"):
-            analysis = call_gemini_ai(f"Analiza estos tickets y sugiere prioridades: {tickets_df.to_string()}")
-            st.info(analysis)
+    tab1, tab2, tab3 = st.tabs(["📊 Vista de Datos", "🤖 Análisis IA", "📥 Exportar"])
 
-# --- Pantalla 2: Talento & CVs ---
-elif menu == "Talento & CVs":
-    st.header("📂 Análisis de Candidatos con IA")
-    uploaded_files = st.file_uploader("Sube CVs o Base de Datos (CSV/PDF)", accept_multiple_files=True)
-    
-    if uploaded_files:
-        st.success(f"{len(uploaded_files)} archivos cargados.")
-        if st.button("Procesar Archivos con IA"):
-            with st.spinner("La IA está extrayendo información de los archivos..."):
-                # Simulación de extracción de datos por IA para generar las 3 tablas solicitadas
-                prompt_extract = "Genera 3 tablas simuladas basadas en los perfiles subidos: 1. Ranking, 2. Skills Técnicas, 3. Estado de Pipeline."
-                raw_data = call_gemini_ai(prompt_extract)
-                
-                # Aquí crearíamos los dataframes (Simulado para demostración funcional)
-                df1 = pd.DataFrame({"Candidato": ["A", "B"], "Score": [90, 85]})
-                df2 = pd.DataFrame({"Skill": ["Python", "Cisco"], "Nivel": ["Senior", "Junior"]})
-                df3 = pd.DataFrame({"Fase": ["Entrevista", "Filtro"], "Cantidad": [5, 12]})
-                
-                st.session_state['talent_tables'] = [df1, df2, df3]
-                st.session_state['ia_summary'] = raw_data
-                st.rerun()
-
-    if 'talent_tables' in st.session_state:
-        titles = ["Ranking de Candidatos", "Matriz de Skills", "Estado del Pipeline"]
-        for i, df in enumerate(st.session_state['talent_tables']):
-            st.subheader(titles[i])
-            AgGrid(df, fit_columns_on_grid_load=True)
-
-# --- Pantalla 3: Generador de Informes ---
-elif menu == "Generador de Informes":
-    st.header("📝 Exportar Informe Word")
-    
-    if 'talent_tables' in st.session_state:
-        st.write("Datos listos para exportación (3 Tablas de Talento + Resumen IA).")
+    with tab1:
+        col1, col2 = st.columns(2)
+        if 'fallas_isp' in dfs:
+            with col1: 
+                st.subheader("Fallas ISP")
+                st.dataframe(dfs['fallas_isp'].head(5))
+        if 'reclamos' in dfs:
+            with col2:
+                st.subheader("Reclamos Abonados")
+                st.dataframe(dfs['reclamos'].head(5))
         
-        if st.button("Generar y Descargar Reporte (.docx)"):
-            doc_buffer = generate_word_report(
-                st.session_state['talent_tables'], 
-                ["Ranking", "Skills", "Pipeline"],
-                st.session_state.get('ia_summary', "Análisis no disponible")
-            )
-            
-            st.download_button(
-                label="📥 Descargar Informe Word",
-                data=doc_buffer,
-                file_name="Reporte_Estrategico_Meru.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-    else:
-        st.warning("Primero debes procesar datos en la sección de 'Talento & CVs'.")
+        if 'uso' in dfs:
+            st.subheader("Tráfico (Data Usage)")
+            st.line_chart(dfs['uso'].set_index('Date').iloc[:, :5]) # Primeras 5 columnas para visualización
 
-# --- Footer ---
-st.sidebar.markdown("---")
-st.sidebar.caption("Soporta: CSV, Word Export, ECharts & AgGrid")
+    with tab2:
+        st.subheader("Análisis Estratégico de la IA")
+        if st.button("Ejecutar Análisis de Marzo 2026"):
+            # Crear contexto limitado para la IA
+            context = ""
+            if 'fallas_isp' in dfs: context += f"Fallas ISP: {dfs['fallas_isp'].shape[0]} registros. "
+            if 'uso' in dfs: context += f"Tráfico Promedio: {dfs['uso'].mean().mean():.2f} MB. "
+            
+            with st.spinner("Gemini analizando patrones de red..."):
+                analysis_result = call_gemini_analysis(context)
+                st.session_state['ia_report'] = analysis_result
+                st.write(analysis_result)
+        elif 'ia_report' in st.session_state:
+            st.write(st.session_state['ia_report'])
+
+    with tab3:
+        st.subheader("Generación de Entregables Mensuales")
+        if 'ia_report' in st.session_state:
+            col_a, col_b = st.columns(2)
+            
+            with col_a:
+                st.write("📄 **Informe Word**")
+                word_data = create_word_report(st.session_state['ia_report'], dfs)
+                st.download_button(
+                    "Descargar Informe Word (.docx)", 
+                    word_data, 
+                    "Informe_Gestion_NOC_Marzo_2026.docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+            
+            with col_b:
+                st.write("Excel **Consolidado de Tablas**")
+                excel_data = create_excel_report(
+                    dfs.get('fallas_isp'), 
+                    dfs.get('reclamos'), 
+                    dfs.get('fallas_internas')
+                )
+                st.download_button(
+                    "Descargar Excel de Gestión (.xlsx)", 
+                    excel_data, 
+                    "Tablas_Gestion_NOC_Marzo_2026.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        else:
+            st.warning("Debes ejecutar el Análisis IA primero para generar los reportes.")
+
+else:
+    st.warning("Esperando carga de archivos CSV para iniciar el proceso...")
