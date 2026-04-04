@@ -7,7 +7,7 @@ from datetime import datetime
 import streamlit.components.v1 as components
 
 # Configuración de página
-st.set_page_config(page_title="Meru AI - Data Analysis", layout="wide")
+st.set_page_config(page_title="Meru AI - Database & Analysis", layout="wide")
 
 # --- DATABASE SETUP ---
 def init_db():
@@ -38,113 +38,114 @@ def get_history():
     conn.close()
     return df
 
-# Inicializar DB
 init_db()
 
 # --- APP LOGIC ---
 st.title("🛰️ Meru Networks AI Suite")
 
-# Sidebar para carga de archivos e Historial
+# Sidebar
 with st.sidebar:
-    st.header("Configuración y Carga")
-    uploaded_usage = st.file_uploader("Cargar Reporte de Uso (.csv)", type="csv", key="usage")
-    uploaded_stats = st.file_uploader("Cargar Estadísticas Eb/No (.csv)", type="csv", key="stats")
+    st.header("📥 Importar Archivos CSV")
+    st.markdown("Cargue los reportes exportados de la plataforma VNO.")
+    
+    uploaded_usage = st.file_uploader("1. Reporte de Uso (Traffic)", type="csv", help="Archivo: VNO Meru-Networks Data Usage...")
+    uploaded_stats = st.file_uploader("2. Estadísticas Eb/No (Quality)", type="csv", help="Archivo: statistics (XX).csv")
     
     st.divider()
-    if st.button("Limpiar Historial"):
+    st.subheader("⚙️ Gestión de Datos")
+    if st.button("🗑️ Borrar Historial de BD"):
         conn = sqlite3.connect('meru_history.db')
         conn.cursor().execute("DELETE FROM history")
         conn.commit()
         conn.close()
-        st.success("Historial eliminado")
+        st.warning("Historial eliminado de la base de datos.")
         st.rerun()
 
-# Pestañas principales
-tab_analysis, tab_history = st.tabs(["📊 Análisis Actual", "📜 Historial de Datos"])
+# Tabs
+tab_analysis, tab_history = st.tabs(["📊 Análisis en Tiempo Real", "📜 Historial de Base de Datos"])
 
 if 'current_analysis' not in st.session_state:
     st.session_state.current_analysis = None
 
 with tab_analysis:
     if uploaded_usage and uploaded_stats:
-        if st.button("🚀 INICIAR ANÁLISIS IA", use_container_width=True):
+        st.success("Archivos listos para procesar.")
+        if st.button("🚀 PROCESAR E IMPORTAR A HISTORIAL", use_container_width=True):
             try:
-                # Procesar Uso
+                # 1. Procesar Reporte de Uso (Saltando encabezados de metadata de Meru)
                 usage_df = pd.read_csv(uploaded_usage, skiprows=3)
-                # Procesar Stats
+                # Eliminar columna Date para cálculos
+                if 'Date' in usage_df.columns:
+                    usage_data_only = usage_df.drop(columns=['Date'])
+                else:
+                    usage_data_only = usage_df
+                
+                # Obtener última fila (más reciente)
+                latest_usage_row = usage_data_only.iloc[-1]
+                # Convertir a numérico y limpiar
+                numeric_usage = pd.to_numeric(latest_usage_row, errors='coerce').fillna(0)
+                
+                # 2. Procesar Estadísticas Eb/No
                 stats_df = pd.read_csv(uploaded_stats)
-                
                 latest_stats = stats_df.iloc[-1]
-                latest_usage = usage_df.iloc[-1]
                 
-                # Identificar anomalías de Eb/No
                 anomalies = []
                 for col in stats_df.columns:
                     if "Eb/No" in col:
                         try:
                             val = float(latest_stats[col])
-                            if val < 10.0:
+                            if 0.1 < val < 10.0: # Evitar ceros absolutos como anomalía si es desconexión
                                 anomalies.append({
                                     "node": col.split('/')[0].replace('"', ''),
                                     "value": val,
-                                    "type": "Eb/No Bajo"
+                                    "type": "Eb/No Crítico"
                                 })
                         except: continue
 
-                # Tráfico
-                numeric_usage = pd.to_numeric(latest_usage, errors='coerce').fillna(0)
-                total_traffic = round(numeric_usage.sum() / 1024, 2)
+                # Totales
+                total_traffic_gb = round(numeric_usage.sum() / 1024, 2)
+                node_count = len(numeric_usage)
                 
+                # Top Nodes (filtrando Date si aparece)
+                top_nodes = numeric_usage.sort_values(ascending=False).head(10).to_dict()
+
                 analysis_result = {
                     "success": True,
-                    "total_traffic": total_traffic,
+                    "total_traffic": total_traffic_gb,
                     "anomalies": anomalies,
-                    "node_count": len(usage_df.columns) - 1,
-                    "top_nodes": numeric_usage.sort_values(ascending=False).head(10).to_dict()
+                    "node_count": node_count,
+                    "top_nodes": top_nodes
                 }
                 
                 st.session_state.current_analysis = analysis_result
-                # Guardar en DB
-                save_to_history(total_traffic, analysis_result["node_count"], len(anomalies), analysis_result)
-                st.success("Análisis completado y guardado en base de datos.")
+                save_to_history(total_traffic_gb, node_count, len(anomalies), analysis_result)
+                st.balloons()
             
             except Exception as e:
-                st.error(f"Error procesando archivos: {e}")
+                st.error(f"Error en procesamiento: {e}")
     else:
-        st.info("Por favor, sube ambos archivos CSV en el panel lateral para habilitar el botón de análisis.")
+        st.info("Utilice el panel lateral para importar los archivos CSV de Meru.")
 
-    # Renderizado del Dashboard (si existe análisis)
     if st.session_state.current_analysis:
         path_to_html = "index.html"
         if os.path.exists(path_to_html):
             with open(path_to_html, 'r', encoding='utf-8') as f:
                 html_content = f.read()
             
-            # Inyectar datos en el HTML
             analysis_data = json.dumps(st.session_state.current_analysis)
             full_html = html_content.replace("window.ANALYSIS_DATA = null;", f"window.ANALYSIS_DATA = {analysis_data};")
-            components.html(full_html, height=700, scrolling=True)
+            components.html(full_html, height=750, scrolling=False)
 
 with tab_history:
+    st.subheader("Historial de Análisis Guardados")
     history_df = get_history()
     if not history_df.empty:
-        st.subheader("Registros almacenados")
-        # Mostrar tabla resumida
-        st.dataframe(history_df[["timestamp", "traffic_gb", "node_count", "anomaly_count"]], use_container_width=True)
+        st.dataframe(history_df[["id", "timestamp", "traffic_gb", "node_count", "anomaly_count"]], use_container_width=True)
         
-        # Selección para ver detalles
-        selected_id = st.selectbox("Seleccionar registro para ver detalle:", history_df["id"])
-        if selected_id:
+        selected_id = st.number_input("Ver detalles del ID:", min_value=int(history_df['id'].min()), max_value=int(history_df['id'].max()))
+        if st.button("Cargar detalle histórico"):
             row = history_df[history_df["id"] == selected_id].iloc[0]
-            details = json.loads(row["details"])
-            st.json(details)
+            st.session_state.current_analysis = json.loads(row["details"])
+            st.info(f"Mostrando datos del registro {selected_id} en la pestaña de Análisis.")
     else:
-        st.write("No hay registros en la base de datos.")
-
-# CSS para mejorar estética
-st.markdown("""
-    <style>
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { font-weight: bold; }
-    </style>
-""", unsafe_allow_html=True)
+        st.write("La base de datos está vacía. Importe archivos para generar un historial.")
