@@ -1,178 +1,120 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import numpy as np
 import requests
 import json
 import time
-import os
 
 # --- CONFIGURACIÓN DE API IA ---
-# Clave proporcionada para Gemini
+# Clave proporcionada por el usuario
 apiKey = "AIzaSyBQy0psFsocJJNn5rEsiYRCi-dqOH_qDmg" 
+# Usando el modelo estable 1.5-flash para evitar el error 404
+MODEL_NAME = "gemini-1.5-flash"
 
-def call_gemini_analysis(data_content, is_csv=False):
-    """Llamada a Gemini 2.5 Flash para análisis de red y datos CSV"""
+def call_gemini_analysis(data_content):
+    """Llamada a Gemini 1.5 Flash para análisis técnico de NOC"""
     
     if not apiKey:
-        return "❌ Error: No se ha configurado la API Key de Google Gemini."
+        return "❌ Error: API Key no configurada."
 
-    if is_csv:
-        system_prompt = (
-            "Eres el Analista Senior de Datos de Meru NOC (Teleport/Satellite Network). "
-            "Tu tarea es analizar el archivo CSV cargado, identificar anomalías en los parámetros "
-            "de red (Eb/No, Es/No, Latencia, Packet Loss, Jitter) y proporcionar un resumen ejecutivo "
-            "con recomendaciones técnicas de optimización y posibles causas de degradación."
-        )
-        user_query = f"ANALIZA ESTOS DATOS DE TELEMETRÍA (CSV): \n{data_content}\n. Genera un reporte técnico para el equipo de NOC:"
-    else:
-        system_prompt = "Eres el Ingeniero de IA de Meru NOC. Analiza la telemetría actual."
-        user_query = f"REPORTE: {data_content}."
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={apiKey}"
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={apiKey}"
+    system_prompt = (
+        "Eres el sistema experto de Meru Intelligence Center. Tu especialidad es la telemetría satelital y de redes. "
+        "Analiza los siguientes datos de un archivo CSV de monitoreo (NOC). Busca saturación de ancho de banda, "
+        "caídas de Eb/No, fluctuaciones de latencia o pérdida de paquetes. "
+        "Responde con un informe técnico estructurado en: 1. Resumen de Salud, 2. Anomalías Detectadas, 3. Recomendaciones."
+    )
+    
     payload = {
-        "contents": [{"parts": [{"text": user_query}]}],
-        "systemInstruction": {
-            "parts": [{"text": system_prompt}]
-        }
+        "contents": [{
+            "parts": [{"text": f"SISTEMA: {system_prompt}\n\nDATOS A ANALIZAR:\n{data_content}"}]
+        }]
     }
     
     headers = {'Content-Type': 'application/json'}
     
-    # Implementación de reintentos con backoff exponencial
-    for i in range(5):
+    # Reintentos con backoff exponencial
+    for i in range(3):
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=40)
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
             if response.status_code == 200:
                 result = response.json()
-                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "Análisis completado sin respuesta de texto.")
+                return result['candidates'][0]['content']['parts'][0]['text']
+            elif response.status_code == 404:
+                return f"⚠️ Error 404: El modelo '{MODEL_NAME}' no fue encontrado. Verifica la disponibilidad en tu región o cuenta de Google AI Studio."
             elif response.status_code == 429:
                 time.sleep(2**i)
                 continue
             else:
-                return f"⚠️ Error del motor de IA ({response.status_code}): {response.text}"
+                return f"⚠️ Error de API ({response.status_code}): {response.text}"
         except Exception as e:
-            time.sleep(2**i)
-            error_msg = str(e)
+            return f"⚠️ Excepción de conexión: {str(e)}"
     
-    return f"⚠️ Error de conexión: {error_msg}"
+    return "Error: Máximo de reintentos alcanzado."
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# --- INTERFAZ STREAMLIT ---
 st.set_page_config(page_title="Meru NOC - AI Master", page_icon="🛰️", layout="wide")
 
-# --- ESTILOS PERSONALIZADOS ---
 st.markdown("""
     <style>
-    .main { background-color: #0d1117; color: #e6edf3; }
-    .stMetric { background-color: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 15px; }
-    .ai-response { 
+    .report-container { 
         background-color: #1c2128; 
         border-left: 5px solid #238636; 
-        padding: 20px; 
-        border-radius: 8px; 
-        margin-top: 20px;
+        padding: 25px; 
+        border-radius: 10px;
         color: #e6edf3;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        line-height: 1.6;
-    }
-    .status-card {
-        padding: 10px;
-        border-radius: 5px;
-        text-align: center;
-        font-weight: bold;
+        font-family: sans-serif;
     }
     </style>
     """, unsafe_allow_html=True)
 
-def main():
-    # --- BARRA LATERAL ---
-    st.sidebar.title("🛰️ Meru NOC")
-    st.sidebar.markdown("---")
-    st.sidebar.header("📁 Importar Datos")
-    uploaded_file = st.sidebar.file_uploader("Cargar archivo CSV de telemetría (iDirect/Sat)", type=["csv"])
+st.title("🛰️ Meru Intelligence Center")
+st.subheader("Monitoreo Proactivo de Red con IA")
+
+# Sidebar
+st.sidebar.header("📁 Importar Datos")
+uploaded_file = st.sidebar.file_uploader("Cargar statistics (44).csv", type=["csv"])
+
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    st.sidebar.success("Archivo cargado correctamente")
     
-    # --- HEADER ---
-    col_logo, col_title = st.columns([1, 5])
-    with col_title:
-        st.title("Meru Intelligence Center")
-        st.caption("Dashboard de Monitoreo Proactivo con IA (Gemini 2.5 Flash)")
-
-    st.divider()
-
-    if uploaded_file is not None:
-        try:
-            # Lectura del CSV
-            df = pd.read_csv(uploaded_file)
-            st.success(f"✅ Archivo '{uploaded_file.name}' cargado correctamente.")
-            
-            # Layout principal con CSV cargado
-            tab1, tab2 = st.tabs(["📊 Visualización de Datos", "🧠 Diagnóstico IA"])
-            
-            with tab1:
-                col_stat1, col_stat2, col_stat3 = st.columns(3)
-                col_stat1.metric("Total Registros", len(df))
-                
-                # Intentar detectar columnas numéricas clave automáticamente
-                numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-                
-                with st.expander("Ver tabla completa de datos"):
-                    st.dataframe(df, use_container_width=True)
-                
-                if numeric_cols:
-                    st.subheader("📈 Análisis de Tendencias")
-                    c1, c2 = st.columns([1, 3])
-                    with c1:
-                        y_axis = st.selectbox("Seleccionar Métrica", options=numeric_cols)
-                        x_axis = st.selectbox("Eje Temporal / Índice", options=df.columns)
-                    with c2:
-                        fig = px.line(df, x=x_axis, y=y_axis, title=f"Evolución de {y_axis}", template="plotly_dark")
-                        fig.update_traces(line_color='#58a6ff')
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("No se encontraron columnas numéricas para graficar.")
-
-            with tab2:
-                st.subheader("Análisis Predictivo y de Salud")
-                st.info("La IA analizará las tendencias, estadísticas y anomalías dentro de los datos cargados.")
-                
-                if st.button("🚀 Iniciar Diagnóstico de Red con IA"):
-                    with st.spinner("Gemini está procesando la telemetría..."):
-                        # Extraemos una muestra representativa para no exceder límites de tokens
-                        # pero manteniendo la esencia estadística
-                        stats_summary = df.describe().to_string()
-                        head_sample = df.head(15).to_string()
-                        tail_sample = df.tail(15).to_string()
-                        
-                        data_payload = f"ESTADÍSTICAS GENERALES:\n{stats_summary}\n\nMUESTRA INICIAL:\n{head_sample}\n\nMUESTRA FINAL:\n{tail_sample}"
-                        
-                        analysis_result = call_gemini_analysis(data_payload, is_csv=True)
-                        
-                        st.markdown(f"""
-                        <div class="ai-response">
-                            <h3 style='margin-top:0;'>Reporte de Inteligencia Meru NOC</h3>
-                            {analysis_result}
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Opción para descargar reporte
-                        st.download_button("Descargar Reporte IA", analysis_result, file_name="reporte_ia_meru.txt")
-
-        except Exception as e:
-            st.error(f"Error al procesar el archivo: {str(e)}")
-    else:
-        # Estado inicial si no hay archivo
-        st.warning("Esperando carga de datos de telemetría (CSV) en la barra lateral...")
+    tab_viz, tab_ai = st.tabs(["📊 Visualización", "🧠 Análisis Predictivo"])
+    
+    with tab_viz:
+        st.write("### Vista Previa de Telemetría")
+        st.dataframe(df.head(10), use_container_width=True)
         
-        # Dashboard demo simplificado
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Status Teleport", "ONLINE", delta="Stable")
-        c2.metric("Nodos en Alerta", "0", delta="0")
-        c3.metric("Promedio Eb/No (Pool)", "11.5 dB")
-        
-        # Simulación visual
-        chart_data = pd.DataFrame(np.random.randn(20, 1), columns=['EbNo'])
-        st.line_chart(chart_data)
+        num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        if num_cols:
+            col_chart1, col_chart2 = st.columns(2)
+            with col_chart1:
+                feat = st.selectbox("Métrica Primaria", num_cols, index=0)
+                fig1 = px.line(df, y=feat, title=f"Tendencia de {feat}", template="plotly_dark")
+                st.plotly_chart(fig1, use_container_width=True)
+            with col_chart2:
+                feat2 = st.selectbox("Métrica Secundaria", num_cols, index=min(1, len(num_cols)-1))
+                fig2 = px.histogram(df, x=feat2, title=f"Distribución de {feat2}", template="plotly_dark")
+                st.plotly_chart(fig2, use_container_width=True)
 
-if __name__ == "__main__":
-    main()
+    with tab_ai:
+        st.write("### Informe de Inteligencia Artificial")
+        
+        if st.button("🚀 Ejecutar Diagnóstico con Gemini"):
+            with st.spinner("Analizando patrones de red..."):
+                # Preparar datos: Estadísticas + Muestra representativa
+                stats = df.describe().to_string()
+                # Tomamos las 20 filas con valores más altos en la primera columna numérica (posibles picos)
+                # y las primeras/últimas filas.
+                sample_data = df.head(15).to_string()
+                
+                context = f"ESTADÍSTICAS DESCRIPTIVAS:\n{stats}\n\nMUESTRA DE DATOS:\n{sample_data}"
+                
+                report = call_gemini_analysis(context)
+                
+                st.markdown(f'<div class="report-container">{report}</div>', unsafe_allow_html=True)
+                st.download_button("Descargar Reporte", report, file_name="diagnostico_noc.md")
+else:
+    st.info("Por favor, carga el archivo CSV en la barra lateral para comenzar el análisis.")
