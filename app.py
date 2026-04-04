@@ -3,8 +3,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
+import io
 
-# Configuración de la página (Debe ser la primera instrucción de Streamlit)
+# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
     page_title="NOC Meru Networks - Dashboard",
     page_icon="📡",
@@ -12,172 +13,247 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilo CSS personalizado para mejorar la interfaz
+# --- ESTILOS PERSONALIZADOS ---
 st.markdown("""
     <style>
-    .main {
-        background-color: #f8fafc;
-    }
+    .main { background-color: #f8fafc; }
     .stMetric {
         background-color: #ffffff;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        border: 1px solid #e2e8f0;
     }
     div[data-testid="stExpander"] {
-        border: none !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 12px !important;
         background-color: white;
     }
+    .status-online { color: #10b981; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
+# --- FUNCIONES DE UTILIDAD ---
+def get_csv_download_link(df, filename):
+    """Genera un link de descarga para los datos procesados"""
+    csv = df.to_csv(index=False)
+    return st.download_button(
+        label=f"📥 Descargar {filename}",
+        data=csv,
+        file_name=filename,
+        mime='text/csv',
+    )
+
+def identify_date_col(df):
+    """Identifica la columna de fecha sin importar el nombre exacto"""
+    for col in ["Date (UTC)", "Date", "Timestamp", "time"]:
+        if col in df.columns:
+            return col
+    return None
+
+# --- PROCESAMIENTO DE MÓDULOS ---
+
 def process_ebno(df, stations):
-    """Procesa y visualiza datos de Eb/No"""
-    st.subheader("📊 Análisis de Señal Satelital (Eb/No)")
+    st.header("📊 Análisis de Señal Satelital (Eb/No)")
+    
+    date_col = identify_date_col(df)
+    if date_col:
+        df[date_col] = pd.to_datetime(df[date_col])
     
     col1, col2 = st.columns([1, 3])
     with col1:
         selected_st = st.selectbox("Seleccionar Estación", sorted(list(stations)), key="ebno_select")
         
-    # Columnas esperadas
+        # Filtro de fecha simple
+        if date_col:
+            min_date = df[date_col].min().date()
+            max_date = df[date_col].max().date()
+            date_range = st.date_input("Rango de fechas", [min_date, max_date])
+            
+            if len(date_range) == 2:
+                df = df[(df[date_col].dt.date >= date_range[0]) & (df[date_col].dt.date <= date_range[1])]
+
     fl_col = f"{selected_st}/FL Tuner Eb/No"
     rl_col = f"{selected_st}/RL Measured Eb/No"
-    date_col = "Date (UTC)" if "Date (UTC)" in df.columns else "Date"
     
     if fl_col in df.columns and rl_col in df.columns:
+        # Gráfica interactiva
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df[date_col], y=df[fl_col], name="Forward Link", line=dict(color='#3b82f6')))
-        fig.add_trace(go.Scatter(x=df[date_col], y=df[rl_col], name="Return Link", line=dict(color='#f59e0b')))
+        fig.add_trace(go.Scatter(x=df[date_col], y=df[fl_col], name="Forward Link", line=dict(color='#3b82f6', width=2)))
+        fig.add_trace(go.Scatter(x=df[date_col], y=df[rl_col], name="Return Link", line=dict(color='#f59e0b', width=2)))
+        
         fig.update_layout(
             hovermode="x unified",
+            xaxis_title="Tiempo (UTC)",
+            yaxis_title="Eb/No (dB)",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             margin=dict(l=0, r=0, t=30, b=0),
-            height=400
+            height=450,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
         )
         st.plotly_chart(fig, use_container_width=True)
+        
+        # Estadísticas Rápidas
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Promedio FL", f"{df[fl_col].mean():.2f} dB")
+        c2.metric("Promedio RL", f"{df[rl_col].mean():.2f} dB")
+        # Estimación de disponibilidad (ejemplo: Eb/No > 4)
+        uptime = (df[fl_col] > 4).sum() / len(df) * 100
+        c3.metric("Est. Disponibilidad", f"{uptime:.1f}%")
     else:
-        st.warning(f"No se encontraron columnas de Eb/No para {selected_st}")
+        st.error(f"⚠️ Las columnas de Eb/No para '{selected_st}' no se encuentran en este archivo.")
 
 def process_usage(df, stations):
-    """Procesa y visualiza reporte de uso de datos"""
-    st.subheader("💾 Consumo de Datos (MB)")
+    st.header("💾 Reporte de Consumo de Datos")
     
-    usage_data = []
+    usage_list = []
     for st_name in stations:
         in_col = f"{st_name} In"
         out_col = f"{st_name} Out"
         if in_col in df.columns and out_col in df.columns:
             total_in = df[in_col].sum()
             total_out = df[out_col].sum()
-            usage_data.append({
+            usage_list.append({
                 "Estación": st_name,
                 "Descarga (MB)": round(total_in, 2),
                 "Subida (MB)": round(total_out, 2),
                 "Total (MB)": round(total_in + total_out, 2)
             })
     
-    if usage_data:
-        usage_df = pd.DataFrame(usage_data).sort_values("Total (MB)", ascending=False)
+    if usage_list:
+        usage_df = pd.DataFrame(usage_list).sort_values("Total (MB)", ascending=False)
         
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            fig = px.bar(usage_df.head(10), x="Estación", y=["Descarga (MB)", "Subida (MB)"], 
-                         title="Top 10 Estaciones por Consumo", barmode="stack",
-                         color_discrete_sequence=['#3b82f6', '#94a3b8'])
+        col_chart, col_data = st.columns([2, 1])
+        with col_chart:
+            fig = px.pie(usage_df.head(8), values='Total (MB)', names='Estación', 
+                         title="Distribución de Tráfico (Top 8 Estaciones)",
+                         hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig, use_container_width=True)
-        
-        with c2:
-            st.dataframe(usage_df, hide_index=True, use_container_width=True)
-    else:
-        st.info("Sube un archivo de 'Data Usage Report' para ver estas métricas.")
+            
+            fig_bar = px.bar(usage_df.head(15), x="Estación", y=["Descarga (MB)", "Subida (MB)"],
+                             title="Comparativa Descarga vs Subida", barmode="group")
+            st.plotly_chart(fig_bar, use_container_width=True)
 
+        with col_data:
+            st.write("### Resumen")
+            st.dataframe(usage_df, hide_index=True, use_container_width=True)
+            get_csv_download_link(usage_df, "consumo_total.csv")
+    else:
+        st.info("Sube un archivo de 'Data Usage' para activar este módulo.")
+
+# --- APP PRINCIPAL ---
 def main():
-    # Sidebar: Logo y Carga de Archivos
+    # Barra Lateral
     with st.sidebar:
         st.title("📡 Meru NOC")
-        st.markdown("---")
-        uploaded_files = st.file_uploader("Cargar archivos CSV", type="csv", accept_multiple_files=True)
-        st.info("Tipos: Statistics (Eb/No), Octets o Data Usage.")
+        st.markdown("*Herramienta de Diagnóstico Operativo*")
+        st.divider()
+        
+        uploaded_files = st.file_uploader(
+            "Subir Reportes CSV", 
+            type=["csv"], 
+            accept_multiple_files=True,
+            help="Puedes subir múltiples archivos de Eb/No, Octetos o Uso de Datos simultáneamente."
+        )
+        
+        if uploaded_files:
+            st.success(f"{len(uploaded_files)} archivos cargados.")
+            if st.button("Limpiar Cache"):
+                st.rerun()
+        
+        st.divider()
+        st.markdown("🔒 **Seguridad**: Los datos se procesan localmente en la sesión y no se guardan permanentemente.")
 
     if not uploaded_files:
-        st.title("Bienvenido al Dashboard del NOC")
-        st.image("https://img.freepik.com/free-vector/network-monitoring-concept-illustration_114360-5023.jpg", width=400)
-        st.markdown("""
-        ### Instrucciones:
-        1. Localiza tus reportes CSV de **Meru Networks**.
-        2. Arrástralos al panel lateral izquierdo.
-        3. El sistema detectará automáticamente si son datos de señal, tráfico o consumo.
-        """)
+        st.title("Bienvenido al Portal de Monitoreo")
+        st.subheader("Para comenzar, carga tus archivos en el panel izquierdo.")
+        
+        # Dashboard de bienvenida visual
+        cols = st.columns(3)
+        with cols[0]:
+            st.info("📶 **Monitoreo Satelital**\nVisualiza niveles Eb/No y estabilidad de señal.")
+        with cols[1]:
+            st.info("📉 **Tráfico de Red**\nAnaliza el flujo de octetos y congestión.")
+        with cols[2]:
+            st.info("💰 **Reporte de Uso**\nGenera resúmenes de consumo por estación.")
+        
+        st.image("https://images.unsplash.com/photo-1551703599-6b3e8379aa8b?q=80&w=1000&auto=format&fit=crop", caption="NOC Infrastructure", use_container_width=True)
         return
 
-    # Consolidación de datos
-    all_stations = set()
+    # Estructura de datos consolidada
     data_dict = {"ebno": None, "usage": None, "octets": None}
+    all_stations = set()
 
-    for uploaded_file in uploaded_files:
-        df = pd.read_csv(uploaded_file)
-        cols = df.columns.tolist()
-        
-        # Identificar tipo de archivo por sus columnas
-        if any("Eb/No" in c for c in cols):
-            data_dict["ebno"] = df
-            for c in cols:
-                if "/" in c: all_stations.add(c.split("/")[0])
-        
-        elif any(" In" in c for c in cols) and any(" Out" in c for c in cols):
-            data_dict["usage"] = df
-            for c in cols:
-                if " In" in c: all_stations.add(c.replace(" In", ""))
-        
-        elif any("Octets" in c for c in cols):
-            data_dict["octets"] = df
-            for c in cols:
-                if "/" in c: all_stations.add(c.split("/")[0])
+    for file in uploaded_files:
+        try:
+            df = pd.read_csv(file)
+            cols = df.columns.tolist()
+            
+            # Lógica de detección de tipo de archivo
+            if any("Eb/No" in c for c in cols):
+                data_dict["ebno"] = df
+                for c in cols:
+                    if "/" in c: all_stations.add(c.split("/")[0])
+            
+            elif any(" In" in c for c in cols) and any(" Out" in c for c in cols):
+                data_dict["usage"] = df
+                for c in cols:
+                    if " In" in c: all_stations.add(c.replace(" In", ""))
+            
+            elif any("Octets" in c for c in cols):
+                data_dict["octets"] = df
+                for c in cols:
+                    if "/" in c: all_stations.add(c.split("/")[0])
+        except Exception as e:
+            st.error(f"Error procesando {file.name}: {e}")
 
-    # Header Principal
-    st.title("🚀 Panel de Control Operativo")
+    # HEADER PRINCIPAL CON MÉTRICAS
+    st.title("🚀 Dashboard de Operaciones")
     
-    # KPIs Rápidos
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric("Estaciones", len(all_stations))
-    
-    total_recs = sum(len(d) for d in data_dict.values() if d is not None)
-    kpi2.metric("Registros Totales", f"{total_recs:,}")
-    
-    modulos = sum(1 for d in data_dict.values() if d is not None)
-    kpi3.metric("Módulos Activos", modulos)
-    
-    kpi4.metric("Estado NOC", "ONLINE", delta="Estable")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Estaciones Únicas", len(all_stations))
+    m2.metric("Archivos Activos", sum(1 for v in data_dict.values() if v is not None))
+    m3.metric("Último Reporte", datetime.now().strftime("%H:%M:%S"))
+    m4.metric("Status", "EN LÍNEA", delta_color="normal")
 
-    # Pestañas de Navegación
-    tab_list = []
-    if data_dict["ebno"] is not None: tab_list.append("📡 Niveles Eb/No")
-    if data_dict["usage"] is not None: tab_list.append("💾 Consumo Data")
-    if data_dict["octets"] is not None: tab_list.append("📈 Tráfico Octetos")
+    # SISTEMA DE PESTAÑAS
+    tabs = []
+    if data_dict["ebno"] is not None: tabs.append("📶 Niveles Eb/No")
+    if data_dict["usage"] is not None: tabs.append("💾 Consumo Data")
+    if data_dict["octets"] is not None: tabs.append("📈 Tráfico Red")
 
-    if tab_list:
-        tabs = st.tabs(tab_list)
+    if tabs:
+        st_tabs = st.tabs(tabs)
         
-        for i, tab_name in enumerate(tab_list):
-            with tabs[i]:
+        for i, tab_name in enumerate(tabs):
+            with st_tabs[i]:
                 if "Eb/No" in tab_name:
                     process_ebno(data_dict["ebno"], all_stations)
                 elif "Consumo" in tab_name:
                     process_usage(data_dict["usage"], all_stations)
-                elif "Octetos" in tab_name:
-                    st.subheader("📈 Monitoreo de Tráfico (Octetos)")
-                    search = st.text_input("Buscar estación...", key="search_oct").upper()
+                elif "Tráfico" in tab_name:
+                    st.header("📈 Monitoreo de Tráfico de Octetos")
+                    search_st = st.selectbox("Seleccionar Estación para Tráfico", sorted(list(all_stations)))
                     
                     df_oct = data_dict["octets"]
-                    date_col = "Date (UTC)" if "Date (UTC)" in df_oct.columns else "Date"
-                    target_cols = [c for c in df_oct.columns if search in c and "ifInOctets" in c][:5]
+                    date_c = identify_date_col(df_oct)
+                    if date_c: df_oct[date_c] = pd.to_datetime(df_oct[date_c])
                     
-                    if target_cols:
-                        fig_oct = px.line(df_oct, x=date_col, y=target_cols, title="Tráfico de Entrada")
+                    # Graficar In vs Out si existen
+                    in_oct = [c for c in df_oct.columns if search_st in c and "ifInOctets" in c]
+                    out_oct = [c for c in df_oct.columns if search_st in c and "ifOutOctets" in c]
+                    
+                    if in_oct and out_oct:
+                        fig_oct = go.Figure()
+                        fig_oct.add_trace(go.Scatter(x=df_oct[date_c], y=df_oct[in_oct[0]], name="Entrada (In)", fill='tozeroy'))
+                        fig_oct.add_trace(go.Scatter(x=df_oct[date_c], y=df_oct[out_oct[0]], name="Salida (Out)", fill='tozeroy'))
+                        fig_oct.update_layout(title=f"Tráfico Octetos - {search_st}", hovermode="x unified")
                         st.plotly_chart(fig_oct, use_container_width=True)
                     else:
-                        st.info("Ingresa el nombre de una estación para ver su tráfico.")
+                        st.warning("No se encontraron columnas de octetos para esta estación.")
+    else:
+        st.warning("Los archivos subidos no coinciden con los formatos conocidos de Meru Networks.")
 
 if __name__ == "__main__":
     main()
