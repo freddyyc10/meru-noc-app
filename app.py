@@ -1,128 +1,77 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-import io
 
-# --- CONFIGURACION DE PAGINA ---
-# Eliminamos acentos y caracteres especiales para evitar SyntaxError
+# Configuración de la página
 st.set_page_config(
-    page_title="NOC Meru Networks - Analizador",
+    page_title="Meru NOC Analytics",
     page_icon="📡",
     layout="wide"
 )
 
-# Estilos basicos para el dashboard
+# --- CORRECCIÓN DEL ERROR ---
+# Se cambió unsafe_allow_stdio por unsafe_allow_html
 st.markdown("""
     <style>
+    .main {
+        background-color: #f0f2f6;
+    }
     .stMetric {
-        background-color: #161b22;
-        padding: 10px;
-        border-radius: 5px;
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     </style>
-    """, unsafe_allow_stdio=True)
-
-def get_clean_df(file):
-    """Limpia el CSV saltando metadatos de iDirect hasta encontrar la cabecera"""
-    try:
-        # Leemos el archivo ignorando errores de decodificacion
-        raw_content = file.getvalue().decode('utf-8', errors='ignore').splitlines()
-        skip_rows = 0
-        
-        # Palabras clave para detectar el inicio de los datos reales
-        keywords = ["Date", "Time", "Octets", "Bit Rate", "Eb/No"]
-        
-        for i, line in enumerate(raw_content):
-            if any(key in line for key in keywords):
-                skip_rows = i
-                break
-        
-        file.seek(0)
-        df = pd.read_csv(file, skiprows=skip_rows)
-        # Limpiar nombres de columnas: quitar espacios y comillas
-        df.columns = [str(c).strip().replace('"', '') for c in df.columns]
-        return df
-    except Exception as e:
-        st.error(f"Error procesando el archivo: {str(e)}")
-        return pd.DataFrame()
-
-def show_signal_analysis(df):
-    """Visualizacion de Eb/No y Niveles de Senal"""
-    st.subheader("Analisis de Niveles de Senal (Eb/No)")
-    
-    ebno_cols = [c for c in df.columns if "Eb/No" in c]
-    time_col = next((c for c in df.columns if "Time" in c or "Date" in c), None)
-
-    if not ebno_cols:
-        st.warning("No se detectaron columnas de Eb/No en este archivo.")
-        return
-
-    # Extraer nombres de estaciones
-    stations = list(set([c.split('/')[0] for c in ebno_cols if '/' in c]))
-    if not stations:
-        stations = ebno_cols
-
-    selected_station = st.selectbox("Seleccionar Estacion:", stations)
-    
-    # Filtrar columnas de la estacion seleccionada
-    plot_data = [c for c in ebno_cols if selected_station in c]
-    
-    fig = go.Figure()
-    for col in plot_data:
-        fig.add_trace(go.Scatter(
-            x=df[time_col] if time_col else df.index,
-            y=df[col],
-            name=col.split('/')[-1] if '/' in col else col,
-            mode='lines'
-        ))
-
-    fig.update_layout(
-        title=f"Historico de Senal: {selected_station}",
-        hovermode="x unified",
-        template="plotly_dark",
-        xaxis=dict(title="Tiempo"),
-        yaxis=dict(title="dB")
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    """, unsafe_allow_html=True)
 
 def main():
-    # Barra lateral
-    st.sidebar.title("Meru NOC Dashboard")
-    files = st.sidebar.file_uploader("Cargar Reportes CSV de iDirect", type="csv", accept_multiple_files=True)
+    st.title("📡 Meru Networks - Dashboard NOC")
+    st.subheader("Análisis de Rendimiento de Red")
 
-    if not files:
-        st.title("Sistema NOC Meru Networks")
-        st.info("Por favor, suba los archivos CSV exportados desde iDirect para iniciar el analisis.")
-        return
+    # Sidebar para carga de datos
+    st.sidebar.header("Carga de Datos")
+    uploaded_file = st.sidebar.file_uploader("Subir reporte CSV de Meru", type=["csv"])
 
-    # Resumen basico
-    col1, col2 = st.columns(2)
-    col1.metric("Archivos Cargados", len(files))
-    col2.metric("Estado de Red", "Monitoreando")
-
-    for f in files:
-        with st.expander(f"Reporte: {f.name}", expanded=True):
-            df = get_clean_df(f)
-            if df.empty:
-                st.warning(f"El archivo {f.name} no contiene datos validos.")
-                continue
+    if uploaded_file is not None:
+        try:
+            # Leemos el CSV
+            df = pd.read_csv(uploaded_file)
             
-            # Busqueda de patrones en las columnas
-            col_text = " ".join(df.columns).lower()
-            
-            if "eb/no" in col_text:
-                show_signal_analysis(df)
-            elif "octets" in col_text or "bit rate" in col_text:
-                st.subheader("Analisis de Trafico")
-                st.dataframe(df.head(10))
-            else:
-                st.write("Vista previa de datos desconocidos:")
-                st.dataframe(df.head(10))
+            # Limpieza básica de columnas (espacios en blanco)
+            df.columns = [c.strip() for c in df.columns]
 
-    # Pie de pagina limpio (sin simbolos especiales)
-    st.markdown("---")
-    st.caption("Meru Networks (c) 2024 - Sistema de Gestion de Red")
+            # Layout de métricas principales
+            col1, col2, col3 = st.columns(3)
+            
+            # Ejemplo de métricas (ajusta según los nombres de tus columnas reales)
+            if 'Eb/No' in df.columns:
+                avg_ebno = df['Eb/No'].mean()
+                col1.metric("Eb/No Promedio", f"{avg_ebno:.2f} dB")
+            
+            if 'Traffic' in df.columns:
+                total_traffic = df['Traffic'].sum()
+                col2.metric("Tráfico Total", f"{total_traffic} MB")
+                
+            col3.metric("Estado del Sistema", "Online", delta="Estable")
+
+            # Gráfico de serie temporal
+            st.write("### Tendencia de Señal")
+            # Buscamos columnas numéricas para graficar
+            numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+            if numeric_cols:
+                selected_metric = st.selectbox("Seleccionar métrica para graficar", numeric_cols)
+                fig = px.line(df, y=selected_metric, title=f"Histórico de {selected_metric}")
+                st.plotly_chart(fig, use_container_width=True)
+
+            # Tabla de datos
+            with st.expander("Ver tabla de datos completa"):
+                st.dataframe(df)
+
+        except Exception as e:
+            st.error(f"Error procesando el archivo: {e}")
+    else:
+        st.info("Esperando carga de archivo CSV para mostrar estadísticas...")
 
 if __name__ == "__main__":
     main()
