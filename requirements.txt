@@ -5,3 +5,6 @@ requests
 streamlit-aggrid
 streamlit-echarts
 streamlit-option-menu
+openpyxl
+docxtpl
+python-docx
