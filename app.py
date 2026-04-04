@@ -9,7 +9,7 @@ import time
 # --- CONFIGURACIÓN DE ENTORNO (ABRIL 2026) ---
 # Dejamos la clave vacía para que el entorno la provea o el usuario la ingrese
 API_KEY = "" 
-MODEL_NAME = "gemini-3.0-flash"
+MODEL_NAME = "gemini-3.1-flash-lite"
 
 def generate_meru_intelligence(df_summary, df_anomalies, user_key):
     """
