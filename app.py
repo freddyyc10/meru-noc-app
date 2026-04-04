@@ -2,123 +2,154 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import io
+import requests
+import time
+from io import StringIO
 
-# Configuración de la página
-st.set_page_config(page_title="Analizador Meru VNO", layout="wide")
+# Configuración de página
+st.set_page_config(page_title="Meru VNO - AI Dashboard", layout="wide", initial_sidebar_state="collapsed")
 
-st.title("📊 Analizador de Red Meru VNO")
-st.markdown("Herramienta de procesamiento para reportes de tráfico y calidad de señal.")
+# --- Estilos Personalizados ---
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stMetric { background-color: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .report-card { background-color: #ffffff; padding: 20px; border-radius: 15px; border-left: 5px solid #007bff; margin-bottom: 20px; }
+    .ai-badge { background-color: #e3f2fd; color: #0d47a1; padding: 4px 12px; border-radius: 20px; font-weight: bold; font-size: 0.8rem; }
+    </style>
+    """, unsafe_allow_stdio=True)
 
-def process_data(usage_file, stats_file):
+# --- Lógica de IA Gemini ---
+apiKey = ""
+
+def get_gemini_analysis(prompt_content):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={apiKey}"
+    
+    payload = {
+        "contents": [{"parts": [{"text": prompt_content}]}],
+        "systemInstruction": {
+            "parts": [{"text": "Eres un Ingeniero de Soporte Nivel 3 en Redes Satelitales. Tu tarea es analizar logs de tráfico y niveles de Eb/No. Identifica degradación de servicio, posibles fallas de hardware, o problemas de clima. Sé conciso, técnico y directo."}]
+        }
+    }
+    
+    for delay in [1, 2, 4]: # Reintentos rápidos
+        try:
+            response = requests.post(url, json=payload, timeout=20)
+            if response.status_code == 200:
+                return response.json()['candidates'][0]['content']['parts'][0]['text']
+        except:
+            time.sleep(delay)
+    return "⚠️ El servicio de análisis de IA no pudo responder en este momento. Intente nuevamente."
+
+# --- Procesamiento de Datos ---
+def load_data(usage_file, stats_file):
     try:
-        # 1. Cargar Reporte de Uso (Saltando 3 líneas de encabezado)
-        # Basado en 'VNO Meru-Networks Data Usage Report (20).csv'
-        df_usage_raw = pd.read_csv(usage_file, skiprows=3)
+        # 1. Procesar Tráfico (Usage)
+        # Saltamos las primeras 3 filas como en el archivo original
+        df_u = pd.read_csv(usage_file, skiprows=3)
+        station_cols = [c for c in df_u.columns if c != 'Date']
+        unique_stations = sorted(list(set([c.replace(' In', '').replace(' Out', '') for c in station_cols])))
         
-        # 2. Cargar Estadísticas (Eb/No)
-        # Basado en 'statistics (44).csv'
-        df_stats_raw = pd.read_csv(stats_file)
-
-        # --- PROCESAMIENTO DE TRÁFICO ---
-        cols_traffic = [c for c in df_usage_raw.columns if c != 'Date']
-        # Obtener nombres de estaciones únicos quitando " In" y " Out"
-        stations = sorted(list(set([c.rsplit(' ', 1)[0] for c in cols_traffic])))
+        usage_summary = []
+        for s in unique_stations:
+            in_val = pd.to_numeric(df_u[f"{s} In"], errors='coerce').sum() if f"{s} In" in df_u.columns else 0
+            out_val = pd.to_numeric(df_u[f"{s} Out"], errors='coerce').sum() if f"{s} Out" in df_u.columns else 0
+            usage_summary.append({"Estación": s, "Download_MB": in_val, "Upload_MB": out_val, "Total_MB": in_val + out_val})
         
-        usage_data = []
-        for s in stations:
-            col_in = f"{s} In"
-            col_out = f"{s} Out"
-            
-            val_in = pd.to_numeric(df_usage_raw[col_in], errors='coerce').sum() if col_in in df_usage_raw.columns else 0
-            val_out = pd.to_numeric(df_usage_raw[col_out], errors='coerce').sum() if col_out in df_usage_raw.columns else 0
-            
-            usage_data.append({
-                "Estación": s,
-                "Descarga (MB)": round(val_in, 2),
-                "Carga (MB)": round(val_out, 2),
-                "Total (MB)": round(val_in + val_out, 2)
-            })
-            
-        df_usage = pd.DataFrame(usage_data).sort_values(by="Total (MB)", ascending=False)
+        df_usage = pd.DataFrame(usage_summary).sort_values("Total_MB", ascending=False)
 
-        # --- PROCESAMIENTO DE EB/NO ---
-        ebno_data = []
-        ebno_cols = [c for c in df_stats_raw.columns if 'Eb/No' in c]
+        # 2. Procesar Eb/No (Statistics)
+        df_s = pd.read_csv(stats_file)
+        ebno_summary = []
+        ebno_cols = [c for c in df_s.columns if 'Eb/No' in c]
         
         for col in ebno_cols:
-            # El formato suele ser "NOMBRE_ESTACION/Tipo Eb/No"
-            parts = col.split('/')
-            station_name = parts[0].strip()
-            tipo = "Forward Link" if "FL" in col else "Return Link"
-            
-            avg_val = pd.to_numeric(df_stats_raw[col], errors='coerce').mean()
-            
-            if not np.isnan(avg_val):
-                ebno_data.append({
-                    "Estación": station_name,
-                    "Tipo": tipo,
-                    "Eb/No Promedio (dB)": round(avg_val, 2)
-                })
+            name = col.split('/')[0].strip()
+            tipo = "RL (Return)" if "RL" in col else "FL (Forward)"
+            mean_val = pd.to_numeric(df_s[col], errors='coerce').mean()
+            if not np.isnan(mean_val):
+                ebno_summary.append({"Estación": name, "Tipo": tipo, "EbNo_Avg": round(mean_val, 2)})
         
-        df_ebno = pd.DataFrame(ebno_data)
-        
+        df_ebno = pd.DataFrame(ebno_summary)
         return df_usage, df_ebno
-
     except Exception as e:
-        st.error(f"Error al procesar los archivos: {e}")
+        st.error(f"Error en estructura de archivos: {e}")
         return None, None
 
-# --- Zona de Carga de Archivos ---
-col1, col2 = st.columns(2)
-with col1:
-    u_file = st.file_uploader("Subir Reporte de Uso (Usage Report)", type="csv")
-with col2:
-    s_file = st.file_uploader("Subir Estadísticas (Statistics)", type="csv")
+# --- Interfaz de Usuario ---
+st.title("🛰️ Meru Networks AI Insights")
+st.markdown("Analizador de rendimiento de estaciones VNO mediante Inteligencia Artificial.")
+
+with st.sidebar:
+    st.header("Carga de Datos")
+    u_file = st.file_uploader("CSV de Tráfico (Usage Report)", type="csv")
+    s_file = st.file_uploader("CSV de Eb/No (Statistics)", type="csv")
+    st.info("Sube ambos archivos para iniciar el diagnóstico automático.")
 
 if u_file and s_file:
-    df_u, df_e = process_data(u_file, s_file)
+    df_usage, df_ebno = load_data(u_file, s_file)
     
-    if df_u is not None:
-        # Métricas de Resumen
-        st.divider()
-        m1, m2, m3, m4 = st.columns(4)
-        total_red = df_u['Total (MB)'].sum()
-        m1.metric("Tráfico Total", f"{total_red/1024:.2f} GB")
-        m2.metric("Estaciones Activas", len(df_u))
+    if df_usage is not None and df_ebno is not None:
+        # Layout de la Aplicación
+        tab1, tab2 = st.tabs(["🤖 Diagnóstico IA", "📊 Métricas de Red"])
         
-        if not df_e.empty:
-            avg_fl = df_e[df_e['Tipo'] == 'Forward Link']['Eb/No Promedio (dB)'].mean()
-            m3.metric("Promedio Eb/No FL", f"{avg_fl:.2f} dB")
+        with tab1:
+            st.markdown("### <span class='ai-badge'>GEMINI 2.5 FLASH</span> Análisis de Salud de Red", unsafe_allow_stdio=True)
             
-            low_signal = len(df_e[df_e['Eb/No Promedio (dB)'] < 8.0])
-            m4.metric("Estaciones Alerta (<8dB)", low_signal)
-
-        # Pestañas de Visualización
-        tab_t, tab_s = st.tabs(["📊 Tráfico de Datos", "📡 Calidad de Señal"])
-        
-        with tab_t:
-            st.subheader("Consumo por Estación")
-            fig_usage = px.bar(df_u.head(20), x='Estación', y=['Descarga (MB)', 'Carga (MB)'],
-                               title="Top 20 Estaciones por Consumo",
-                               barmode='group',
-                               color_discrete_map={'Descarga (MB)': '#00CC96', 'Carga (MB)': '#636EFA'})
-            st.plotly_chart(fig_usage, use_container_width=True)
+            # Preparar contexto para la IA
+            top_usage = df_usage.head(8).to_string(index=False)
+            worst_ebno = df_ebno.sort_values("EbNo_Avg").head(8).to_string(index=False)
             
-            st.dataframe(df_u, use_container_width=True, hide_index=True)
-
-        with tab_s:
-            if not df_e.empty:
-                st.subheader("Análisis de Eb/No")
-                fig_ebno = px.scatter(df_e, x='Estación', y='Eb/No Promedio (dB)', color='Tipo',
-                                     title="Niveles de Eb/No detectados",
-                                     height=500)
-                fig_ebno.add_hline(y=8.0, line_dash="dash", line_color="red", annotation_text="Umbral Crítico")
-                st.plotly_chart(fig_ebno, use_container_width=True)
+            prompt = f"""
+            Analiza los siguientes datos de la red Meru VNO:
+            
+            TOP CONSUMO (MB):
+            {top_usage}
+            
+            PEORES NIVELES Eb/No (dB):
+            {worst_ebno}
+            
+            1. ¿Existen estaciones con alto tráfico pero señal marginal (Eb/No < 8dB)?
+            2. Identifica si alguna estación parece tener problemas de apuntamiento (Eb/No bajo constante).
+            3. Da 3 recomendaciones técnicas de prioridad inmediata.
+            """
+            
+            with st.container():
+                st.markdown("<div class='report-card'>", unsafe_allow_stdio=True)
+                if 'ai_report' not in st.session_state:
+                    with st.spinner("Gemini está analizando los patrones de red..."):
+                        st.session_state.ai_report = get_gemini_analysis(prompt)
                 
-                st.dataframe(df_e, use_container_width=True, hide_index=True)
-            else:
-                st.warning("No se detectaron datos de Eb/No válidos en el archivo de estadísticas.")
+                st.markdown(st.session_state.ai_report)
+                st.markdown("</div>", unsafe_allow_stdio=True)
+                
+                if st.button("🔄 Recalcular Análisis"):
+                    del st.session_state.ai_report
+                    st.rerun()
+
+        with tab2:
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                st.subheader("Tráfico por Estación")
+                fig_u = px.bar(df_usage.head(15), x="Total_MB", y="Estación", orientation='h', 
+                               color="Total_MB", color_continuous_scale="Viridis")
+                st.plotly_chart(fig_u, use_container_width=True)
+                
+            with col2:
+                st.subheader("Calidad de Señal (Eb/No)")
+                fig_e = px.scatter(df_ebno, x="Estación", y="EbNo_Avg", color="Tipo", 
+                                   title="Eb/No Promedio por Estación", height=400)
+                st.plotly_chart(fig_e, use_container_width=True)
+            
+            st.subheader("Datos Crudos Procesados")
+            st.dataframe(df_usage, use_container_width=True)
 
 else:
-    st.info("Por favor, sube ambos archivos para iniciar el análisis.")
+    # Pantalla de espera interactiva
+    st.empty()
+    col_a, col_b, col_c = st.columns([1,2,1])
+    with col_b:
+        st.image("https://img.icons8.com/fluency/96/satellite-sending-signal.png", width=100)
+        st.warning("Esperando archivos CSV para iniciar el análisis...")
+        st.write("Por favor, carga los reportes en el panel lateral izquierdo.")
