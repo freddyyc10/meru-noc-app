@@ -1,258 +1,225 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from io import BytesIO
-import requests
-import json
-import time
-from datetime import datetime
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  Satellite, Activity, AlertTriangle, Zap, ShieldCheck, 
+  Terminal, SignalHigh, Database, Wifi, Search, BarChart3
+} from 'lucide-react';
+import { 
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar
+} from 'recharts';
 
-# Librerías para generación de documentos
-from docx import Document
-from docx.shared import Inches
-import pandas as pd
+// Datos simulados basados en reportes de red
+const PERFORMANCE_DATA = [
+  { time: '00:00', ebno: 14.2, traffic: 400 },
+  { time: '04:00', ebno: 14.8, traffic: 300 },
+  { time: '08:00', ebno: 15.1, traffic: 800 },
+  { time: '12:00', ebno: 13.9, traffic: 1200 },
+  { time: '16:00', ebno: 14.5, traffic: 950 },
+  { time: '20:00', ebno: 15.3, traffic: 600 },
+  { time: '23:59', ebno: 15.0, traffic: 450 },
+];
 
-# Configuración de la página
-st.set_page_config(
-    page_title="Meru NOC - Enterprise Analysis",
-    page_icon="🛰️",
-    layout="wide"
-)
+const NODES = [
+  { id: 'DC72', name: 'WARAIRAREPANO', type: 'HUB', status: 'online', fl: 15.5, rl: 9.8, load: 75 },
+  { id: 'MER00', name: 'OBSERVATORIO', type: 'REMOTE', status: 'online', fl: 14.9, rl: 9.2, load: 30 },
+  { id: 'ZUL36', name: 'CABIMAS', type: 'REMOTE', status: 'warning', fl: 11.2, rl: 7.1, load: 85 },
+  { id: 'AMA05', name: 'CAICET', type: 'REMOTE', status: 'online', fl: 15.1, rl: 9.4, load: 15 },
+  { id: 'GUA19', name: 'HCHF', type: 'REMOTE', status: 'error', fl: 0.0, rl: 0.0, load: 0 },
+  { id: 'FAL16', name: 'MORUY', type: 'REMOTE', status: 'online', fl: 14.7, rl: 9.1, load: 45 },
+  { id: 'ARA16', name: 'VALLE MORIN', type: 'REMOTE', status: 'online', fl: 14.3, rl: 9.5, load: 22 },
+];
 
-# --- ESTILOS PERSONALIZADOS ---
-st.markdown("""
-    <style>
-    .main {
-        background-color: #0e1117;
-    }
-    .stMetric {
-        background-color: #1e293b;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #334155;
-    }
-    div[data-testid="stSidebarNav"] {
-        background-image: url('https://www.google.com/s2/favicons?domain=meru.com');
-        background-repeat: no-repeat;
-        padding-top: 80px;
-        background-position: 20px 20px;
-    }
-    .stButton>button {
-        width: 100%;
-        border-radius: 5px;
-        height: 3em;
-        background-color: #2563eb;
-        color: white;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+const StatusBadge = ({ status }) => {
+  const config = {
+    online: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    warning: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    error: "bg-rose-500/10 text-rose-400 border-rose-500/20"
+  };
+  return (
+    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${config[status]}`}>
+      {status}
+    </span>
+  );
+};
 
-# --- ESTADO DE LA SESIÓN (BASE DE DATOS VOLÁTIL) ---
-if 'tickets' not in st.session_state:
-    st.session_state.tickets = []
-if 'raw_data' not in st.session_state:
-    st.session_state.raw_data = None
-if 'ai_analysis' not in st.session_state:
-    st.session_state.ai_analysis = ""
+const MetricCard = ({ title, value, unit, icon: Icon, color }) => (
+  <div className="bg-[#0d1117] border border-slate-800 p-4 rounded-xl hover:border-slate-700 transition-all">
+    <div className="flex justify-between items-start mb-2">
+      <div className={`p-2 rounded-lg bg-${color}-500/10`}>
+        <Icon className={`w-5 h-5 text-${color}-400`} />
+      </div>
+    </div>
+    <div className="text-slate-500 text-[10px] uppercase font-bold tracking-widest">{title}</div>
+    <div className="flex items-baseline gap-1 mt-1">
+      <span className="text-2xl font-black text-white tracking-tighter">{value}</span>
+      <span className="text-slate-500 text-xs">{unit}</span>
+    </div>
+  </div>
+);
 
-# --- FUNCIONES CORE ---
+export default function App() {
+  const [search, setSearch] = useState("");
+  const [logs, setLogs] = useState([
+    "Sincronizando con satélite Star One D2...",
+    "VNO Meru-Networks: 142 terminales detectadas.",
+    "Monitoreo de Eb/No activo en tiempo real."
+  ]);
 
-def call_gemini_api(data_summary):
-    """Simulación de integración con Gemini API (Vertex AI / AI Studio)"""
-    # En un entorno real, usaría:
-    # url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
-    # Aquí implementamos la lógica de prompt estratégico solicitado
-    
-    prompt = f"""
-    Actúa como un experto en redes NOC. Analiza el siguiente resumen de datos:
-    {data_summary}
-    
-    Proporciona:
-    1. Conclusiones estratégicas sobre el rendimiento.
-    2. Recomendaciones técnicas para optimizar la red.
-    3. Identificación de posibles anomalías.
-    """
-    
-    # Simulación de delay de red y respuesta
-    with st.spinner("Gemini analizando patrones de red..."):
-        time.sleep(2)
-        return f"ANÁLISIS ESTRATÉGICO MERU NOC\n\n1. HALLAZGOS: Se detecta una saturación del 15% en los nodos del sector Norte durante horas pico.\n2. RECOMENDACIÓN: Implementar balanceo de carga preventivo en el segmento BOG-01.\n3. PREVISIÓN: Estabilidad del 99.9% si se aplica el parche de firmware v2.4."
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const msgs = [
+        "ZUL36: Eb/No crítico detectado (11.2 dB)",
+        "Respaldo automático completado en MER00",
+        "Tráfico inusual detectado en HUB-DC72",
+        "GUA19: Reintentando handshake..."
+      ];
+      setLogs(prev => [msgs[Math.floor(Math.random() * msgs.length)], ...prev.slice(0, 4)]);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
 
-def generate_excel_reports(df):
-    """Genera 3 reportes diferenciados en un solo buffer zip o archivos individuales"""
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name='Rendimiento General')
-        if 'error' in df.columns or 'status' in df.columns:
-            df[df.iloc[:, -1] == 'Error'].to_excel(writer, sheet_name='Reporte de Errores')
-        df.describe().to_excel(writer, sheet_name='Resumen Ejecutivo')
-    return output.getvalue()
+  const filteredNodes = useMemo(() => 
+    NODES.filter(n => n.name.toLowerCase().includes(search.toLowerCase()) || n.id.toLowerCase().includes(search.toLowerCase())),
+    [search]
+  );
 
-def generate_word_doc(analysis_text):
-    doc = Document()
-    doc.add_heading('Informe Técnico Meru NOC', 0)
-    doc.add_paragraph(f'Fecha de generación: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-    doc.add_heading('Análisis de Inteligencia Artificial (Gemini)', level=1)
-    doc.add_paragraph(analysis_text)
-    
-    buffer = BytesIO()
-    doc.save(buffer)
-    return buffer.getvalue()
-
-# --- INTERFAZ DE USUARIO (NAVEGACIÓN) ---
-
-with st.sidebar:
-    st.title("Meru NOC System")
-    st.image("https://img.icons8.com/fluency/96/network-antenna.png", width=80)
-    menu = st.radio(
-        "Navegación Principal",
-        ["Dashboard & Ingesta", "Análisis Gemini AI", "Gestor de Tickets", "Exportar Reportes"]
-    )
-    st.divider()
-    st.info("Ingeniero de Guardia: Senior Admin")
-
-# --- MÓDULO 1: INGESTA Y DASHBOARD ---
-if menu == "Dashboard & Ingesta":
-    st.header("🛰️ Centro de Operaciones de Red - Meru")
-    
-    uploaded_files = st.file_uploader("Cargar archivos CSV de Red", type="csv", accept_multiple_files=True)
-    
-    if uploaded_files:
-        dfs = [pd.read_csv(f) for f in uploaded_files]
-        df = pd.concat(dfs, ignore_index=True)
-        st.session_state.raw_data = df
+  return (
+    <div className="min-h-screen bg-[#010409] text-slate-300 p-4 font-sans">
+      {/* Header */}
+      <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center mb-8 gap-4 border-b border-slate-800 pb-6">
+        <div className="flex items-center gap-3">
+          <div className="bg-sky-500 p-2 rounded-lg shadow-lg shadow-sky-500/20">
+            <Satellite className="text-slate-900 w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-xl font-black tracking-tighter text-white italic">MERU NOC</h1>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Global Operations Center</p>
+            </div>
+          </div>
+        </div>
         
-        st.success(f"Cargados {len(uploaded_files)} archivos con {len(df)} registros totales.")
-        
-        # Métricas principales
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Registros", len(df))
-        col2.metric("Nodos Activos", "1,284")
-        col3.metric("Uptime Global", "99.98%", "0.02%")
-        col4.metric("Latencia Promedio", "14ms", "-2ms")
-        
-        # Visualización
-        st.subheader("Análisis Visual de Tráfico")
-        if len(df.columns) >= 2:
-            fig = px.line(df, x=df.columns[0], y=df.columns[1], title="Tendencia de Tráfico de Red (Mbps)")
-            fig.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig, use_container_width=True)
-            
-            col_a, col_b = st.columns(2)
-            with col_a:
-                fig_bar = px.bar(df.head(10), x=df.columns[0], y=df.columns[1], color=df.columns[1], title="Carga por Nodo")
-                st.plotly_chart(fig_bar, use_container_width=True)
-            with col_b:
-                st.write("Vista previa de datos cargados")
-                st.dataframe(df.head(10), use_container_width=True)
+        <div className="relative w-full md:w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+          <input 
+            type="text"
+            placeholder="Buscar terminal..."
+            className="w-full bg-[#0d1117] border border-slate-800 rounded-lg py-2 pl-10 pr-4 text-xs focus:outline-none focus:border-sky-500"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
 
-# --- MÓDULO 2: INTEGRACIÓN GEMINI AI ---
-elif menu == "Análisis Gemini AI":
-    st.header("🧠 Inteligencia Artificial Estratégica")
-    
-    if st.session_state.raw_data is not None:
-        if st.button("Ejecutar Análisis con Gemini Pro"):
-            summary = st.session_state.raw_data.describe().to_string()
-            result = call_gemini_api(summary)
-            st.session_state.ai_analysis = result
-            
-        if st.session_state.ai_analysis:
-            st.markdown("### Hallazgos de la IA")
-            st.info(st.session_state.ai_analysis)
-            
-            # Opción para crear ticket desde el hallazgo
-            if st.button("Convertir Hallazgos en Ticket de Falla"):
-                new_ticket = {
-                    "id": len(st.session_state.tickets) + 1,
-                    "fecha": datetime.now().strftime("%Y-%m-%d"),
-                    "titulo": "Incidencia detectada por AI",
-                    "prioridad": "Alta",
-                    "estado": "Abierto",
-                    "descripcion": st.session_state.ai_analysis[:100] + "..."
-                }
-                st.session_state.tickets.append(new_ticket)
-                st.success("Ticket registrado automáticamente.")
-    else:
-        st.warning("Por favor, cargue datos CSV en el Dashboard primero.")
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* KPI Grid */}
+        <div className="lg:col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricCard title="Disponibilidad" value="99.2" unit="%" icon={ShieldCheck} color="emerald" />
+          <MetricCard title="Promedio Eb/No" value="14.6" unit="dB" icon={SignalHigh} color="sky" />
+          <MetricCard title="Latencia" value="580" unit="ms" icon={Activity} color="amber" />
+          <MetricCard title="Ancho de Banda" value="1.2" unit="Gbps" icon={Zap} color="indigo" />
+        </div>
 
-# --- MÓDULO 3: GESTOR DE TICKETS (CRUD) ---
-elif menu == "Gestor de Tickets":
-    st.header("🎫 Sistema de Gestión de Incidencias (CRUD)")
-    
-    # Crear Ticket
-    with st.expander("➕ Registrar Nueva Incidencia"):
-        with st.form("new_ticket"):
-            t_title = st.text_input("Título de la Falla")
-            t_priority = st.selectbox("Prioridad", ["Baja", "Media", "Alta", "Crítica"])
-            t_desc = st.text_area("Descripción Técnica")
-            if st.form_submit_button("Guardar Ticket"):
-                st.session_state.tickets.append({
-                    "id": len(st.session_state.tickets) + 1,
-                    "fecha": datetime.now().strftime("%Y-%m-%d"),
-                    "titulo": t_title,
-                    "prioridad": t_priority,
-                    "estado": "Abierto",
-                    "descripcion": t_desc
-                })
-                st.rerun()
+        {/* Chart Section */}
+        <div className="lg:col-span-8 bg-[#0d1117] border border-slate-800 rounded-2xl p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-sky-400" /> Rendimiento de Enlace (24h)
+            </h3>
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={PERFORMANCE_DATA}>
+                <defs>
+                  <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis dataKey="time" stroke="#475569" fontSize={10} axisLine={false} tickLine={false} />
+                <YAxis stroke="#475569" fontSize={10} axisLine={false} tickLine={false} domain={[10, 18]} />
+                <Tooltip contentStyle={{backgroundColor: '#0d1117', border: '1px solid #334155'}} />
+                <Area type="monotone" dataKey="ebno" stroke="#0ea5e9" strokeWidth={2} fill="url(#grad)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
 
-    # Mostrar Tickets
-    if st.session_state.tickets:
-        ticket_df = pd.DataFrame(st.session_state.tickets)
-        st.subheader("Lista de Incidencias Activas")
-        
-        for i, ticket in enumerate(st.session_state.tickets):
-            col_1, col_2, col_3, col_4 = st.columns([1, 4, 2, 2])
-            col_1.write(f"#{ticket['id']}")
-            col_2.write(f"**{ticket['titulo']}**")
-            col_3.write(f"Priority: {ticket['prioridad']}")
-            
-            # Botón para cerrar ticket (Update en CRUD)
-            if ticket['estado'] == "Abierto":
-                if col_4.button("Cerrar", key=f"close_{i}"):
-                    st.session_state.tickets[i]['estado'] = "Cerrado"
-                    st.rerun()
-            else:
-                col_4.write("✅ Finalizado")
-        
-        st.divider()
-        if st.button("Limpiar todos los tickets"):
-            st.session_state.tickets = []
-            st.rerun()
-    else:
-        st.info("No hay incidencias registradas.")
+        {/* Live Terminal */}
+        <div className="lg:col-span-4 flex flex-col gap-6">
+          <div className="bg-black border border-slate-800 rounded-2xl p-4 font-mono text-[10px] flex-1">
+            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-slate-900">
+              <Terminal className="w-3 h-3 text-emerald-500" />
+              <span className="text-slate-500 uppercase font-bold tracking-tighter">Live_Console_v2</span>
+            </div>
+            <div className="space-y-2">
+              {logs.map((log, i) => (
+                <div key={i} className="flex gap-2">
+                  <span className="text-emerald-500/50">[{new Date().toLocaleTimeString()}]</span>
+                  <span className={i === 0 ? "text-emerald-400" : "text-slate-400"}>{log}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          <div className="bg-rose-500/5 border border-rose-500/20 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="w-4 h-4 text-rose-500" />
+              <span className="text-xs font-bold text-rose-500 uppercase">Alertas Activas</span>
+            </div>
+            <p className="text-[11px] text-slate-400 italic">No se detectan fallos masivos. GUA19 requiere intervención técnica en sitio.</p>
+          </div>
+        </div>
 
-# --- MÓDULO 4: EXPORTACIÓN ---
-elif menu == "Exportar Reportes":
-    st.header("📥 Generación de Entregables")
-    
-    if st.session_state.raw_data is not None:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Reportes en Excel")
-            st.write("Genera archivos diferenciados: Rendimiento, Errores y Resumen.")
-            excel_data = generate_excel_reports(st.session_state.raw_data)
-            st.download_button(
-                label="Descargar Pack de Excel (.xlsx)",
-                data=excel_data,
-                file_name=f"Meru_NOC_Reports_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-        with col2:
-            st.subheader("Informe Word")
-            st.write("Documento profesional con análisis estratégico de IA.")
-            if st.session_state.ai_analysis:
-                word_data = generate_word_doc(st.session_state.ai_analysis)
-                st.download_button(
-                    label="Descargar Informe Ejecutivo (.docx)",
-                    data=word_data,
-                    file_name="Reporte_Estrategico_Meru.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-            else:
-                st.warning("Primero ejecute el análisis en el módulo de IA.")
-    else:
-        st.error("No hay datos disponibles para exportar.")
+        {/* Inventory Table */}
+        <div className="lg:col-span-12 bg-[#0d1117] border border-slate-800 rounded-2xl overflow-hidden">
+          <div className="p-4 border-b border-slate-800 bg-slate-900/20 flex justify-between items-center">
+            <h3 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2">
+              <Database className="w-4 h-4 text-emerald-400" /> Estado por Terminal
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800 bg-black/20">
+                  <th className="px-6 py-4">Estación</th>
+                  <th className="px-6 py-4">Estado</th>
+                  <th className="px-6 py-4">Eb/No (FL)</th>
+                  <th className="px-6 py-4">Eb/No (RL)</th>
+                  <th className="px-6 py-4">Carga CPU</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {filteredNodes.map(node => (
+                  <tr key={node.id} className="hover:bg-slate-800/30 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="font-bold text-white text-xs">{node.id}_{node.name}</div>
+                      <div className="text-[9px] text-slate-500 font-mono">{node.type}</div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <StatusBadge status={node.status} />
+                    </td>
+                    <td className="px-6 py-4 font-mono text-xs">{node.fl > 0 ? `${node.fl} dB` : '--'}</td>
+                    <td className="px-6 py-4 font-mono text-xs">{node.rl > 0 ? `${node.rl} dB` : '--'}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden min-w-[60px]">
+                          <div 
+                            className={`h-full rounded-full ${node.load > 80 ? 'bg-rose-500' : 'bg-sky-500'}`} 
+                            style={{ width: `${node.load}%` }} 
+                          />
+                        </div>
+                        <span className="text-[10px] font-bold">{node.load}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
