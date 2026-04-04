@@ -6,35 +6,32 @@ import requests
 import json
 import time
 
-# --- CONFIGURACIÓN DE VANGUARDIA (ABRIL 2026) ---
-# API Key extraída de tus capturas de pantalla
-API_KEY = "AlzaSyBQy0psFsocJJN5rEsiYRCi-dqOH_qDmg"
-# Actualizado a la serie Gemini 3 (Estándar actual)
+# --- CONFIGURACIÓN DE ENTORNO (ABRIL 2026) ---
+# Dejamos la clave vacía para que el entorno la provea o el usuario la ingrese
+API_KEY = "" 
 MODEL_NAME = "gemini-3.0-flash"
 
-def generate_meru_intelligence(df_summary, df_anomalies):
+def generate_meru_intelligence(df_summary, df_anomalies, user_key):
     """
-    Función de análisis con Gemini 3.
-    Optimizado para diagnósticos de red de baja latencia.
+    Función de análisis con Gemini 3.0.
+    Implementa backoff exponencial para manejar límites de cuota.
     """
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
+    key_to_use = user_key if user_key else API_KEY
+    if not key_to_use:
+        return "❌ Error: No se ha detectado una API Key válida en la configuración o el panel."
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={key_to_use}"
     
     prompt = f"""
-    SISTEMA: Eres el Motor de Inteligencia Artificial de Meru Networks (NOC Proactivo).
-    
-    CONTEXTO DE DATOS:
-    Resumen Estadístico:
-    {df_summary}
-    
-    Muestras de Anomalías (Picos Detectados):
-    {df_anomalies}
+    SISTEMA: Motor de IA Meru Networks (NOC Proactivo).
+    DATOS TELEMETRÍA:
+    Resumen: {df_summary}
+    Picos críticos detectados: {df_anomalies}
     
     INSTRUCCIONES:
-    1. Realiza un diagnóstico proactivo: ¿Hay saturación de ancho de banda o pérdida de paquetes?
-    2. Identifica patrones de comportamiento anómalos.
-    3. Genera 3 recomendaciones de optimización técnica para el equipo de campo.
-    
-    Responde en español, con lenguaje técnico de redes pero conciso.
+    Genera un diagnóstico técnico proactivo sobre el estado de la red. 
+    Identifica si los picos sugieren saturación o fallas de hardware.
+    Provee 3 pasos de mitigación inmediata en español.
     """
 
     payload = {
@@ -43,116 +40,110 @@ def generate_meru_intelligence(df_summary, df_anomalies):
         }]
     }
 
-    # Implementación de retry con backoff exponencial
-    for delay in [1, 2, 4]:
+    # Reintentos automáticos (Backoff exponencial)
+    for delay in [1, 2, 4, 8, 16]:
         try:
-            response = requests.post(url, json=payload, timeout=20)
+            response = requests.post(url, json=payload, timeout=30)
             if response.status_code == 200:
                 result = response.json()
                 return result['candidates'][0]['content']['parts'][0]['text']
-            elif response.status_code == 404:
-                return "❌ Error: Modelo Gemini 3 no encontrado en esta región. Verifica el nombre del modelo."
-            elif response.status_code == 429:
+            elif response.status_code == 400:
+                return f"❌ Error 400: La API Key parece ser inválida. Por favor, revísala en el panel lateral."
+            elif response.status_code == 429: # Límite de cuota
                 time.sleep(delay)
                 continue
             else:
                 return f"⚠️ Error {response.status_code}: {response.text}"
         except Exception as e:
-            return f"❌ Fallo de conexión: {str(e)}"
+            return f"❌ Error de conexión: {str(e)}"
     
-    return "Servicio temporalmente no disponible."
+    return "El servicio no respondió tras varios intentos."
 
-# --- INTERFAZ DE USUARIO ---
+# --- INTERFAZ UI ---
 st.set_page_config(page_title="Meru Intelligence Center", page_icon="🛰️", layout="wide")
 
-# Estilo corporativo Meru (Dark Mode Premium)
+# Estética corporativa (CSS Personalizado)
 st.markdown("""
     <style>
-    .main { background-color: #0d1117; }
-    .stMetric { border: 1px solid #30363d; padding: 15px; border-radius: 10px; background: #161b22; }
-    .report-box { 
-        background-color: #0d1117; 
-        border-left: 5px solid #238636; 
-        padding: 20px; 
-        border-radius: 0 10px 10px 0;
-        font-family: 'Courier New', monospace;
+    .stApp { background-color: #0d1117; color: #c9d1d9; }
+    .report-card { 
+        background: #161b22; 
+        padding: 25px; 
+        border-radius: 12px; 
+        border: 1px solid #30363d;
+        line-height: 1.6;
+    }
+    .metric-box {
+        background: #21262d;
+        padding: 15px;
+        border-radius: 8px;
+        text-align: center;
     }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🛰️ Meru Intelligence Center")
-st.subheader("Monitoreo Proactivo de Red con IA (Generación 3)")
+st.caption("Monitoreo en Tiempo Real | Powered by Gemini 3.0 Series")
 
-# Sidebar para gestión de datos
+# Sidebar
 with st.sidebar:
-    st.image("https://www.gstatic.com/lamda/images/gemini_sparkle_v002.svg", width=50)
-    st.header("Centro de Datos")
-    uploaded_file = st.file_uploader("Cargar Telemetría (.csv)", type=["csv"])
+    st.header("⚙️ Configuración")
+    input_key = st.text_input("Ingresa tu API Key (opcional si ya está configurada)", type="password")
     st.divider()
-    st.info("Versión: Gemini 3.0 Flash-Lite Optimized")
+    uploaded_file = st.file_uploader("Cargar Datos de Red (CSV)", type=["csv"])
+    if uploaded_file:
+        st.success("Archivo cargado correctamente.")
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     
-    # --- DASHBOARD DE MÉTRICAS ---
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Nodos Activos", len(df))
-    with c2:
-        # Buscamos columnas numéricas para promedios
-        num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        val = df[num_cols[0]].mean() if num_cols else 0
-        st.metric("Promedio General", f"{val:.2f}")
-    with c3:
-        st.metric("IA Engine", "Gemini 3.0", "Active")
-    with c4:
-        st.metric("SLA", "99.9% Compliance")
+    # KPIs Rápidos
+    kpi1, kpi2, kpi3 = st.columns(3)
+    with kpi1:
+        st.metric("Total Muestras", len(df))
+    with kpi2:
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        main_metric = numeric_cols[0] if numeric_cols else None
+        if main_metric:
+            st.metric(f"Promedio {main_metric}", f"{df[main_metric].mean():.2f}")
+    with kpi3:
+        st.metric("Estado de IA", "Conectado", delta="Gemini 3.0")
 
-    # --- PESTAÑAS FUNCIONALES ---
-    tab_viz, tab_anom, tab_ai = st.tabs(["📊 Visualización", "🔍 Análisis de Picos", "🧠 Informe de IA"])
+    # Tabs
+    tab_graf, tab_picos, tab_ia = st.tabs(["📊 Gráficos Proactivos", "🔍 Análisis de Picos", "🧠 Diagnóstico IA"])
 
-    with tab_viz:
-        if num_cols:
-            col_ctrl, col_plot = st.columns([1, 3])
-            with col_ctrl:
-                target = st.selectbox("Métrica de Red", num_cols)
-                style = st.radio("Gráfico", ["Área", "Línea", "Barras"])
+    with tab_graf:
+        if main_metric:
+            fig = px.area(df, y=main_metric, title=f"Tendencia de {main_metric}", 
+                          template="plotly_dark", color_discrete_sequence=['#238636'])
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No se encontraron columnas numéricas para graficar.")
+
+    with tab_picos:
+        st.subheader("Detección de Anomalías Críticas")
+        if main_metric:
+            umbral = st.slider("Sensibilidad de Alerta (%)", 80, 99, 95)
+            valor_umbral = df[main_metric].quantile(umbral/100)
+            anomalias = df[df[main_metric] > valor_umbral]
             
-            with col_plot:
-                if style == "Área":
-                    fig = px.area(df, y=target, template="plotly_dark", color_discrete_sequence=['#238636'])
-                elif style == "Línea":
-                    fig = px.line(df, y=target, template="plotly_dark", color_discrete_sequence=['#58a6ff'])
-                else:
-                    fig = px.bar(df, y=target, template="plotly_dark")
-                st.plotly_chart(fig, use_container_width=True)
+            st.error(f"Se detectaron {len(anomalias)} registros que exceden el umbral de {valor_umbral:.2f}")
+            st.dataframe(anomalias, use_container_width=True)
 
-    with tab_anom:
-        st.subheader("Detección de Anomalías")
-        if num_cols:
-            sensivity = st.slider("Sensibilidad de Alerta", 0.8, 1.0, 0.95)
-            q_threshold = df[num_cols[0]].quantile(sensivity)
-            anomalies = df[df[num_cols[0]] > q_threshold]
-            
-            st.warning(f"Se han detectado {len(anomalies)} registros por encima del umbral crítico ({q_threshold:.2f})")
-            st.dataframe(anomalies, use_container_width=True)
-
-    with tab_ai:
-        st.subheader("Informe de Inteligencia Artificial")
-        if st.button("🚀 Generar Diagnóstico con Gemini 3"):
-            with st.spinner("Analizando patrones en la nube de Meru..."):
-                summary_data = df.describe().to_string()
-                top_issues = anomalies.head(10).to_string() if not anomalies.empty else "No se detectan picos críticos."
+    with tab_ia:
+        st.subheader("Generación de Informe Predictivo")
+        if st.button("🚀 Iniciar Análisis con Gemini 3"):
+            with st.spinner("Procesando telemetría..."):
+                summary = df.describe().to_string()
+                peaks = anomalias.head(5).to_string() if not anomalias.empty else "Estable"
                 
-                ai_report = generate_meru_intelligence(summary_data, top_issues)
+                reporte = generate_meru_intelligence(summary, peaks, input_key)
                 
-                st.markdown('<div class="report-box">', unsafe_allow_html=True)
-                st.markdown(ai_report)
+                st.markdown('<div class="report-card">', unsafe_allow_html=True)
+                st.markdown(reporte)
                 st.markdown('</div>', unsafe_allow_html=True)
                 
-                st.download_button("💾 Guardar Reporte", ai_report, file_name="meru_noc_report.md")
+                st.download_button("💾 Exportar Reporte (.txt)", reporte, "reporte_meru.txt")
 
 else:
-    st.info("Esperando carga de datos CSV para iniciar el monitoreo...")
-    # Imagen de respaldo decorativa
-    st.image("https://images.unsplash.com/photo-1551703599-6b3e8379aa8c?auto=format&fit=crop&q=80&w=1200", caption="Centro de Control Meru Networks")
+    st.info("Por favor, sube un archivo CSV de telemetría para comenzar el análisis.")
