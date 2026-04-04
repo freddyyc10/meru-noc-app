@@ -8,153 +8,149 @@ import os
 
 # Librerías necesarias: pip install python-docx xlsxwriter
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Meru Networks | Intelligence Hub", page_icon="📡", layout="wide")
 
-# --- ESTILOS ---
-st.markdown("""
-    <style>
-    .stApp { background-color: #f8fafd; color: #1a202c; font-family: 'Inter', sans-serif; }
-    .metric-card { background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 15px; text-align: center; }
-    .m-value { color: #0366d6; font-size: 1.5rem; font-weight: 700; }
-    </style>
-""", unsafe_allow_html=True)
-
-# --- INICIALIZACIÓN DE REGISTRO ---
-if 'registro_importacion' not in st.session_state:
-    st.session_state.registro_importacion = []
-
 # --- FUNCIONES DE PROCESAMIENTO ---
 def get_clean_df(file):
     content = file.getvalue().decode('utf-8', errors='ignore').splitlines()
-    skip = 0
+    skip_rows = 0
     for i, line in enumerate(content):
-        if any(k in line for k in ["Date", "Time", "Octets", "Eb/No", "FECHA", "ZONA"]):
-            skip = i
+        if any(key in line for key in ["Date", "Time", "Octets", "Eb/No", "FECHA", "ZONA", "NOMBRE ISP"]):
+            skip_rows = i
             break
     file.seek(0)
-    df = pd.read_csv(file, skiprows=skip)
-    df.columns = [str(c).strip().replace('"', '') for c in df.columns]
-    return df
+    try:
+        df = pd.read_csv(file, skiprows=skip_rows)
+        df.columns = [str(c).strip().replace('"', '') for c in df.columns]
+        return df
+    except:
+        return pd.DataFrame()
 
-def export_docx(data_dict):
+# --- MOTOR DE EXPORTACIÓN ESTRUCTURADO (WORD) ---
+def export_structured_docx(processed_data, month_text):
     doc = Document()
-    doc.add_heading('INFORME DE GESTIÓN MENSUAL - MERU NETWORKS', 0)
-    for name, df in data_dict.items():
-        doc.add_heading(f'Reporte: {name}', level=1)
+    
+    # Estilo de Título Principal
+    title = doc.add_heading('INFORME DE GESTIÓN MENSUAL: RED SATELITAL MERU', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    doc.add_paragraph(f"Periodo: {month_text}")
+    doc.add_paragraph("Departamento: Operaciones de Red (NOC) / Soporte Técnico")
+
+    # 1. Resumen Ejecutivo
+    doc.add_heading('1. RESUMEN EJECUTIVO', level=1)
+    doc.add_paragraph("Durante el periodo reportado, la red operó bajo parámetros nominales. (Completar con análisis de IA o manual).")
+
+    # Mapeo de secciones según los archivos cargados
+    sections = {
+        "FALLAS INTERNAS": "2. REPORTE DE FALLAS INTERNAS (GESTIÓN PROPIA)",
+        "ISP": "3. REPORTE DE FALLAS DE PROVEEDORES (ISP)",
+        "RECLAMOS": "4. ATENCIÓN DE RECLAMOS DEL ABONADO"
+    }
+
+    for name, df in processed_data.items():
+        title_text = "REPORTE DETALLADO"
+        for key, val in sections.items():
+            if key in name.upper():
+                title_text = val
+        
+        doc.add_heading(title_text, level=1)
+        
+        # Crear tabla con la estructura del modelo
         table = doc.add_table(rows=1, cols=len(df.columns))
-        for i, col in enumerate(df.columns):
-            table.rows[0].cells[i].text = col
-        for _, row in df.head(20).iterrows(): # Limitado a 20 para el ejemplo
+        table.style = 'Table Grid'
+        hdr_cells = table.rows[0].cells
+        for i, col_name in enumerate(df.columns):
+            hdr_cells[i].text = col_name
+            
+        # Añadir filas (limitado a las primeras 50 para el informe escrito)
+        for _, row in df.head(50).iterrows():
             row_cells = table.add_row().cells
-            for i, val in enumerate(row):
-                row_cells[i].text = str(val)
+            for i, value in enumerate(row):
+                row_cells[i].text = str(value)
+        
+        doc.add_paragraph("\n")
+
     buffer = io.BytesIO()
     doc.save(buffer)
     return buffer.getvalue()
 
-# --- HEADER ---
+# --- UI PRINCIPAL ---
 c1, c2 = st.columns([1, 2])
 with c1:
     if os.path.exists("image_4eb8c8.png"): st.image("image_4eb8c8.png", width=250)
     else: st.title("MERU NETWORKS")
 with c2:
-    st.markdown("<div style='text-align:right; padding-top:10px;'><h3>NOC OPERATIONAL HUB</h3></div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align:right; padding-top:10px;'><h3>NOC OPERATIONAL HUB v9.0</h3></div>", unsafe_allow_html=True)
 
-# --- BARRA LATERAL (FILTROS) ---
 with st.sidebar:
-    st.markdown("### 📥 CARGA Y FILTROS")
-    files = st.file_uploader("Subir Reportes (CSV)", accept_multiple_files=True)
+    st.header("📥 CARGA DE MODELOS")
+    files = st.file_uploader("Subir CSV de Fallas, ISP o Reclamos", accept_multiple_files=True)
     st.markdown("---")
-    sel_month = st.selectbox("Mes de Análisis", ["Marzo 2026", "Abril 2026"])
-    sel_date = st.date_input("Filtrar por Fecha Específica", datetime(2026, 3, 1))
+    sel_month = st.selectbox("Preparando documentos para:", ["Marzo 2026", "Abril 2026", "Mayo 2026"])
 
-# --- MENÚ DE MÓDULOS (TABS ORIGINALES) ---
-tab_dash, tab_tickets, tab_ia, tab_export = st.tabs(["📊 DASHBOARD", "🎫 TICKETS", "🧠 CORE AI", "📥 EXPORTAR"])
+# --- PESTAÑAS ---
+tab_dash, tab_tickets, tab_export = st.tabs(["📊 DASHBOARD ANALÍTICO", "🎫 GESTIÓN DE TICKETS", "📥 EXPORTACIÓN DE INFORMES"])
 
-# Lógica de carga de datos para los módulos
 processed_data = {}
 if files:
     for f in files:
-        df = get_clean_df(f)
-        processed_data[f.name] = df
-        # Registrar en el historial si no existe
-        if f.name not in [x['nombre'] for x in st.session_state.registro_importacion]:
-            st.session_state.registro_importacion.append({
-                "fecha": datetime.now().strftime("%Y-%m-%d"),
-                "nombre": f.name,
-                "filas": len(df)
-            })
+        processed_data[f.name] = get_clean_df(f)
 
-# TAB 1: DASHBOARD (Análisis por fecha/mes)
 with tab_dash:
     if files:
-        st.subheader(f"Análisis Mensual: {sel_month}")
         for name, df in processed_data.items():
-            with st.expander(f"Visualización: {name}", expanded=True):
-                # Gráfica interactiva similar a la v2.0
-                stations = sorted(list(set([c.split('/')[0] for c in df.columns if '/' in c])))
-                if stations:
-                    sel_st = st.multiselect(f"Estaciones en {name}:", stations, default=stations[:1], key=f"st_{name}")
-                    fig = go.Figure()
-                    for s in sel_st:
-                        cols = [c for c in df.columns if c.startswith(s + "/")]
-                        for c in cols:
-                            fig.add_trace(go.Scatter(y=df[c], name=f"{s}-{c.split('/')[-1]}"))
-                    fig.update_layout(template="plotly_white", height=350)
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.dataframe(df.head(10))
+            with st.expander(f"Vista previa: {name}"):
+                st.dataframe(df.head(10), use_container_width=True)
     else:
-        st.info("Cargue archivos para ver el análisis detallado.")
+        st.info("Cargue los archivos de gestión en la barra lateral.")
 
-# TAB 2: TICKETS (Persistente)
 with tab_tickets:
-    st.subheader("Gestión de Incidentes")
-    # Mostrar el registro de importación como parte de la gestión
-    st.write("**Registro de Datos Importados:**")
-    st.table(pd.DataFrame(st.session_state.registro_importacion))
-    
-    st.markdown("---")
-    st.write("**Formulario de Tickets**")
-    # (Estructura de ticket anterior preservada)
-    with st.form("ticket_meru"):
-        col_t1, col_t2 = st.columns(2)
-        node = col_t1.text_input("Nodo")
-        falla = col_t2.selectbox("Tipo de Falla", ["Eb/No Bajo", "Saturación", "Desapuntamiento"])
-        if st.form_submit_button("Registrar Ticket"):
-            st.success(f"Ticket creado para {node}")
+    st.subheader("Registro de Incidentes en Sesión")
+    if files:
+        st.write("Archivos vinculados al reporte mensual:")
+        for f in files:
+            st.caption(f"✅ {f.name}")
 
-# TAB 3: CORE AI
-with tab_ia:
-    st.subheader("Meru AI Engine")
-    query = st.text_input("Consultar diagnóstico de la red:")
-    if st.button("Analizar"):
-        st.write("🔍 **Resultado:** Basado en los archivos de Marzo 2026, se observa una estabilidad del 98% con alertas menores en nodos de Amazonas.")
-
-# TAB 4: EXPORTAR (Nuevo Módulo)
 with tab_export:
-    st.subheader("Exportación de Informes de Gestión")
+    st.subheader("Centro de Generación de Documentos")
+    st.write(f"Estructura basada en los modelos oficiales de **Meru Networks**.")
+    
     if processed_data:
-        st.write(f"Preparando documentos para: **{sel_month}**")
+        col1, col2 = st.columns(2)
         
-        c_exp1, c_exp2 = st.columns(2)
-        
-        with c_exp1:
-            st.info("Generar Informe Word (.docx)")
-            docx_file = export_docx(processed_data)
-            st.download_button("Descargar Informe Word", docx_file, f"Informe_Meru_{sel_month}.docx")
+        with col1:
+            st.markdown("#### 📄 Informe Word")
+            st.write("Genera el .docx con encabezados, tablas de fallas y reclamos formateadas.")
+            docx_bytes = export_structured_docx(processed_data, sel_month)
+            st.download_button(
+                label="Generar Informe Word (.docx)",
+                data=docx_bytes,
+                file_name=f"Informe_Gestion_Meru_{sel_month.replace(' ','_')}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
             
-        with c_exp2:
-            st.info("Generar Base de Datos Excel (.xlsx)")
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        with col2:
+            st.markdown("#### 📊 Base de Datos Excel")
+            st.write("Exporta todas las tablas a un libro Excel con pestañas independientes.")
+            output_xlsx = io.BytesIO()
+            with pd.ExcelWriter(output_xlsx, engine='xlsxwriter') as writer:
                 for name, df in processed_data.items():
-                    df.to_excel(writer, sheet_name=name[:30], index=False)
-            st.download_button("Descargar Reporte Excel", output.getvalue(), f"Reporte_Meru_{sel_month}.xlsx")
+                    # Limpiar nombre de la pestaña (máx 31 caracteres)
+                    sheet_name = name.split('.')[0][:30]
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+            
+            st.download_button(
+                label="Generar Base de Datos Excel (.xlsx)",
+                data=output_xlsx.getvalue(),
+                file_name=f"Reporte_Consolidado_Meru_{sel_month.replace(' ','_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
     else:
-        st.warning("No hay datos cargados para exportar.")
+        st.warning("No hay datos cargados para exportar. Por favor, suba los archivos de gestión.")
 
-st.markdown("<p style='text-align:center; opacity:0.2; margin-top:50px;'>MERU NETWORKS v9.0</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; opacity:0.2; margin-top:50px;'>MERU NETWORKS SECURITY SYSTEM © 2026</p>", unsafe_allow_html=True)
