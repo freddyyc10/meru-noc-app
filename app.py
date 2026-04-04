@@ -4,7 +4,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import io
-import re
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
@@ -13,159 +12,155 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- ESTILOS ---
+# --- ESTILOS PERSONALIZADOS ---
 st.markdown("""
     <style>
-    .main { background-color: #f1f5f9; }
-    .stMetric { background-color: white; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0; }
-    h1, h2, h3 { color: #1e293b; font-family: 'Inter', sans-serif; }
+    .main { background-color: #f8fafc; }
+    .stMetric { background-color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); border: 1px solid #e2e8f0; }
+    h1, h2, h3 { color: #0f172a; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    .stDataFrame { border-radius: 10px; overflow: hidden; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNCIONES DE CARGA ---
+# --- FUNCIONES DE UTILIDAD ---
 
-def clean_csv_header(file):
-    """Detecta el inicio real de los datos y devuelve un DataFrame limpio."""
+def get_clean_df(file):
+    """Limpia el archivo CSV omitiendo metadatos iniciales de iDirect/Meru"""
     content = file.getvalue().decode('utf-8').splitlines()
     skip_rows = 0
     for i, line in enumerate(content):
-        # Buscamos el encabezado que contiene 'Date' o nombres de estaciones con '/'
         if "Date" in line or "/" in line or "Octets" in line:
             skip_rows = i
             break
-    
     file.seek(0)
     df = pd.read_csv(file, skiprows=skip_rows)
-    # Limpiar espacios en los nombres de las columnas
     df.columns = [c.strip() for c in df.columns]
     return df
 
-def get_stations_from_usage(df):
-    """Extrae nombres únicos de estaciones de columnas tipo 'Station / In Octets'."""
-    stations = set()
-    for col in df.columns:
-        if " / " in col:
-            stations.add(col.split(" / ")[0].strip())
-    return sorted(list(stations))
-
-# --- PROCESAMIENTO DE CONSUMO (DATA USAGE) ---
-
-def process_usage_report(df):
-    st.header("💾 Análisis de Consumo de Datos")
+def analyze_usage(df):
+    """Procesa reportes de consumo de datos (Usage)"""
+    st.subheader("📊 Análisis de Consumo de Datos")
     
-    stations = get_stations_from_usage(df)
+    # Identificar estaciones (formato: Estacion / In Octets)
+    stations = sorted(list(set([col.split(" / ")[0].strip() for col in df.columns if " / " in col])))
+    
     if not stations:
-        st.error("No se detectaron columnas con el formato 'Estación / In Octets' o similar.")
+        st.error("No se detectaron columnas de estaciones en el formato esperado (Estación / In/Out Octets).")
+        st.write("Columnas detectadas:", df.columns.tolist())
         return
 
-    usage_data = []
-    
-    for st_name in stations:
-        # Identificar columnas de entrada y salida
-        in_col = next((c for c in df.columns if st_name in c and "In" in c), None)
-        out_col = next((c for c in df.columns if st_name in c and "Out" in c), None)
+    report_data = []
+    for site in stations:
+        in_col = next((c for c in df.columns if site in c and "In" in c), None)
+        out_col = next((c for c in df.columns if site in c and "Out" in c), None)
         
         if in_col and out_col:
-            # Convertir a numérico (Octetos a MB)
-            val_in = pd.to_numeric(df[in_col], errors='coerce').sum() / (1024 * 1024)
-            val_out = pd.to_numeric(df[out_col], errors='coerce').sum() / (1024 * 1024)
+            # Convertir de Octetos a MB
+            down = pd.to_numeric(df[in_col], errors='coerce').sum() / (1024 * 1024)
+            up = pd.to_numeric(df[out_col], errors='coerce').sum() / (1024 * 1024)
             
-            if (val_in + val_out) > 0:
-                usage_data.append({
-                    "Estación": st_name,
-                    "Descarga (MB)": round(val_in, 2),
-                    "Subida (MB)": round(val_out, 2),
-                    "Total (MB)": round(val_in + val_out, 2)
+            if (down + up) > 0:
+                report_data.append({
+                    "Estación": site,
+                    "Descarga (MB)": round(down, 2),
+                    "Subida (MB)": round(up, 2),
+                    "Total (MB)": round(down + up, 2)
                 })
 
-    if usage_data:
-        res_df = pd.DataFrame(usage_data).sort_values("Total (MB)", ascending=False)
+    if report_data:
+        res_df = pd.DataFrame(report_data).sort_values("Total (MB)", ascending=False)
         
-        # Métricas Globales
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Tráfico (MB)", f"{res_df['Total (MB)'].sum():,.2f}")
-        c2.metric("Estación con más Tráfico", res_df.iloc[0]['Estación'])
-        c3.metric("Promedio por Estación", f"{res_df['Total (MB)'].mean():,.2f} MB")
+        # Métricas principales
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Tráfico Total VNO", f"{res_df['Total (MB)'].sum():,.2f} MB")
+        m2.metric("Top Consumo", res_df.iloc[0]['Estación'])
+        m3.metric("Promedio x Estación", f"{res_df['Total (MB)'].mean():,.2f} MB")
 
-        col_left, col_right = st.columns([1.5, 1])
-        
-        with col_left:
-            fig = px.bar(res_df.head(15), 
-                         x='Total (MB)', 
-                         y='Estación', 
-                         orientation='h',
-                         title="Top 15 Estaciones por Consumo Total",
-                         color='Total (MB)',
-                         color_continuous_scale='Blues')
+        # Gráfico y Tabla
+        c1, c2 = st.columns([1.5, 1])
+        with c1:
+            fig = px.bar(res_df.head(15), x='Total (MB)', y='Estación', 
+                         orientation='h', title="Top 15 Estaciones con mayor Consumo",
+                         color='Total (MB)', color_continuous_scale='Viridis')
             fig.update_layout(yaxis={'categoryorder':'total ascending'}, template="plotly_white")
             st.plotly_chart(fig, use_container_width=True)
-            
-        with col_right:
-            st.subheader("Detalle por Estación")
+        
+        with c2:
+            st.write("### Detalle Completo")
             st.dataframe(res_df, hide_index=True, use_container_width=True)
             
             csv = res_df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Descargar Reporte Limpio", csv, "reporte_consumo_meru.csv", "text/csv")
+            st.download_button("📥 Descargar CSV Procesado", csv, "reporte_limpio.csv", "text/csv")
     else:
-        st.warning("El archivo no contiene datos de consumo válidos (sumatoria cero).")
+        st.warning("El archivo parece estar vacío o no contiene valores numéricos válidos.")
 
-# --- PROCESAMIENTO DE EB/NO ---
-
-def process_ebno_report(df):
-    st.header("📶 Análisis de Señal (Eb/No)")
+def analyze_signal(df):
+    """Procesa reportes de Eb/No (Signal)"""
+    st.subheader("📶 Análisis de Niveles de Señal")
     
-    # Intentar detectar columna de fecha
-    date_col = next((c for c in df.columns if "Date" in c or "Timestamp" in c), None)
+    date_col = next((c for c in df.columns if "Date" in c or "Time" in c), None)
     if date_col:
         df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
     
-    stations = []
-    for c in df.columns:
-        if "/" in c: stations.append(c.split("/")[0].strip())
-    stations = sorted(list(set(stations)))
-
-    selected = st.selectbox("Seleccionar Estación para Gráfico Temporal", stations)
+    # Extraer estaciones
+    stations = sorted(list(set([col.split(" / ")[0].strip() for col in df.columns if "/" in col])))
     
-    # Buscar FL (Forward) y RL (Return)
-    fl_col = next((c for c in df.columns if selected in c and ("FL" in c or "In" in c)), None)
-    rl_col = next((c for c in df.columns if selected in c and ("RL" in c or "Out" in c)), None)
+    selected_site = st.selectbox("Seleccione Estación para monitoreo temporal:", stations)
+    
+    # Buscar columnas FL/RL
+    fl = next((c for c in df.columns if selected_site in c and ("FL" in c or "In" in c)), None)
+    rl = next((c for c in df.columns if selected_site in c and ("RL" in c or "Out" in c)), None)
 
-    if fl_col and rl_col:
+    if fl and rl:
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df[date_col] if date_col else df.index, y=df[fl_col], name="Señal FL (dB)"))
-        fig.add_trace(go.Scatter(x=df[date_col] if date_col else df.index, y=df[rl_col], name="Señal RL (dB)"))
-        fig.update_layout(title=f"Histórico de Señal: {selected}", hovermode="x", template="plotly_white")
+        fig.add_trace(go.Scatter(x=df[date_col] if date_col else df.index, y=df[fl], name="Forward (FL) dB", line=dict(color='#2563eb')))
+        fig.add_trace(go.Scatter(x=df[date_col] if date_col else df.index, y=df[rl], name="Return (RL) dB", line=dict(color='#dc2626')))
+        fig.update_layout(title=f"Estabilidad de Señal: {selected_site}", hovermode="x unified", template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Seleccione una estación para ver su rendimiento de señal.")
+        st.info("No se encontraron series temporales de señal para este sitio.")
 
-# --- APP MAIN ---
+# --- INTERFAZ PRINCIPAL ---
 
 def main():
-    st.sidebar.title("📡 Meru Data Engine")
-    uploaded_files = st.sidebar.file_uploader("Subir CSV de iDirect/Meru", type="csv", accept_multiple_files=True)
+    st.sidebar.image("https://img.icons8.com/fluency/96/satellite-sending-signal.png", width=80)
+    st.sidebar.title("Meru Engine v2.0")
+    st.sidebar.markdown("---")
     
+    uploaded_files = st.sidebar.file_uploader(
+        "Cargar reportes de iDirect/Meru (.csv)", 
+        type="csv", 
+        accept_multiple_files=True
+    )
+
     if not uploaded_files:
-        st.title("Sistema de Análisis de Reportes VNO")
-        st.info("Por favor, sube los archivos CSV para generar el análisis automático.")
+        st.title("📡 Panel de Control NOC Meru")
+        st.markdown("""
+        ### Instrucciones:
+        1. Sube tus archivos de **Data Usage** (Consumo) o **Eb/No** (Señal) en el panel izquierdo.
+        2. El sistema detectará automáticamente el tipo de reporte.
+        3. Podrás visualizar métricas, gráficos de tendencia y descargar el resumen.
+        """)
+        st.info("Esperando archivos CSV...")
         return
 
-    # Categorización de archivos
     for file in uploaded_files:
-        with st.expander(f"📄 Procesando: {file.name}", expanded=False):
+        with st.expander(f"📄 Archivo: {file.name}", expanded=True):
             try:
-                df = clean_csv_header(file)
-                cols = str(df.columns.tolist())
+                df = get_clean_df(file)
                 
-                if "Octets" in cols or "Usage" in file.name:
-                    process_usage_report(df)
-                elif "Eb/No" in cols or "Signal" in file.name:
-                    process_ebno_report(df)
+                # Lógica de detección por contenido de columnas o nombre de archivo
+                cols_str = " ".join(df.columns).lower()
+                
+                if "octets" in cols_str or "usage" in file.name.lower():
+                    analyze_usage(df)
+                elif "eb/no" in cols_str or "signal" in file.name.lower():
+                    analyze_signal(df)
                 else:
-                    st.write("Archivo no identificado automáticamente. Vista previa:")
-                    st.dataframe(df.head(5))
+                    st.write("Vista previa del archivo (No categorizado):")
+                    st.dataframe(df.head(10))
             except Exception as e:
-                st.error(f"Error procesando el archivo: {e}")
+                st.error(f"Error procesando el archivo: {str(e)}")
 
 if __name__ == "__main__":
     main()
