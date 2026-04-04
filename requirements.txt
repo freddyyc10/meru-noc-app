@@ -1,12 +1,3 @@
 streamlit
 pandas
-numpy
-requests
-streamlit-aggrid
-streamlit-echarts
-streamlit-option-menu
-openpyxl
-docxtpl
-python-docx
-google-generativeai
 plotly
