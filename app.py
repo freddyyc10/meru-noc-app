@@ -84,13 +84,12 @@ def limpiar_nombre_nodo(nombre):
 def procesar_archivos(file_u, files_s):
     # Procesar Uso
     try:
-        df_raw = pd.read_csv(file_u, header=None)
-        header_row = 0
-        for idx, row in df_raw.iterrows():
-            if any("Date" in str(val) for val in row.values):
-                header_row = idx
-                break
-        df_usage = pd.read_csv(file_u, skiprows=header_row)
+        
+     df = pd.read_csv('tu_archivo.csv', sep=None, engine='python', on_bad_lines='skip')
+    * `sep=None`: Hace que Pandas intente adivinar si usas coma, punto y coma o tabulación.
+* `on_bad_lines='skip'`: Si una línea está mal (como esa línea 4 con 102 campos), simplemente la ignora en lugar de detener todo el programa.
+# Salta las primeras 3 líneas si son títulos o texto innecesario
+df = pd.read_csv('tu_archivo.csv', skiprows=3)
         
         usage_data = []
         for col in df_usage.columns:
