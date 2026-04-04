@@ -7,126 +7,172 @@ import requests
 import json
 import time
 import os
-from datetime import datetime, timedelta
 
 # --- CONFIGURACIÓN DE API IA ---
-apiKey = ""
+# Clave proporcionada para Gemini
+apiKey = "AIzaSyBQy0psFsocJJNn5rEsiYRCi-dqOH_qDmg" 
 
 def call_gemini_analysis(data_content, is_csv=False):
     """Llamada a Gemini 2.5 Flash para análisis de red y datos CSV"""
+    
+    if not apiKey:
+        return "❌ Error: No se ha configurado la API Key de Google Gemini."
+
     if is_csv:
         system_prompt = (
-            "Eres el Analista Senior de Datos de Meru NOC. Tu tarea es analizar el archivo CSV cargado, "
-            "identificar anomalías en los parámetros de red (EbNo, Latencia, Pérdida de Paquetes) y "
-            "proporcionar un resumen ejecutivo con recomendaciones técnicas de optimización."
+            "Eres el Analista Senior de Datos de Meru NOC (Teleport/Satellite Network). "
+            "Tu tarea es analizar el archivo CSV cargado, identificar anomalías en los parámetros "
+            "de red (Eb/No, Es/No, Latencia, Packet Loss, Jitter) y proporcionar un resumen ejecutivo "
+            "con recomendaciones técnicas de optimización y posibles causas de degradación."
         )
-        user_query = f"ANALIZA ESTOS DATOS DE ARCHIVO CSV: \n{data_content}\n. Genera un reporte detallado:"
+        user_query = f"ANALIZA ESTOS DATOS DE TELEMETRÍA (CSV): \n{data_content}\n. Genera un reporte técnico para el equipo de NOC:"
     else:
-        system_prompt = (
-            "Eres el Ingeniero de IA de Meru NOC. Analiza la telemetría actual y sugiere mitigación si EbNo < 10."
-        )
-        user_query = f"REPORTE DE TELEMETRÍA: {data_content}. Diagnóstico técnico:"
+        system_prompt = "Eres el Ingeniero de IA de Meru NOC. Analiza la telemetría actual."
+        user_query = f"REPORTE: {data_content}."
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={apiKey}"
     payload = {
         "contents": [{"parts": [{"text": user_query}]}],
-        "systemInstruction": {"parts": [{"text": system_prompt}]}
+        "systemInstruction": {
+            "parts": [{"text": system_prompt}]
+        }
     }
     
-    retries = 5
-    for i in range(retries):
+    headers = {'Content-Type': 'application/json'}
+    
+    # Implementación de reintentos con backoff exponencial
+    for i in range(5):
         try:
-            response = requests.post(url, json=payload, timeout=15)
+            response = requests.post(url, json=payload, headers=headers, timeout=40)
             if response.status_code == 200:
                 result = response.json()
-                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "Análisis completado.")
+                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "Análisis completado sin respuesta de texto.")
+            elif response.status_code == 429:
+                time.sleep(2**i)
+                continue
+            else:
+                return f"⚠️ Error del motor de IA ({response.status_code}): {response.text}"
+        except Exception as e:
             time.sleep(2**i)
-        except Exception:
-            time.sleep(2**i)
-    return "⚠️ Error de conexión con el motor de IA."
+            error_msg = str(e)
+    
+    return f"⚠️ Error de conexión: {error_msg}"
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Meru NOC - AI Master", page_icon="🛰️", layout="wide")
 
-# --- ESTILOS ---
+# --- ESTILOS PERSONALIZADOS ---
 st.markdown("""
     <style>
     .main { background-color: #0d1117; color: #e6edf3; }
     .stMetric { background-color: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 15px; }
-    .csv-container { border: 1px solid #388bfd; border-radius: 10px; padding: 20px; background-color: #0d1117; }
-    .ai-response { background-color: #1c2128; border-left: 5px solid #388bfd; padding: 20px; border-radius: 5px; margin-top: 20px; }
+    .ai-response { 
+        background-color: #1c2128; 
+        border-left: 5px solid #238636; 
+        padding: 20px; 
+        border-radius: 8px; 
+        margin-top: 20px;
+        color: #e6edf3;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        line-height: 1.6;
+    }
+    .status-card {
+        padding: 10px;
+        border-radius: 5px;
+        text-align: center;
+        font-weight: bold;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 def main():
-    # --- BARRA LATERAL (IMPORTACIÓN CSV) ---
-    st.sidebar.image("Meru Networks JPG Horizontal.jpg", width=180) if os.path.exists("Meru Networks JPG Horizontal.jpg") else st.sidebar.title("MERU NOC")
+    # --- BARRA LATERAL ---
+    st.sidebar.title("🛰️ Meru NOC")
+    st.sidebar.markdown("---")
     st.sidebar.header("📁 Importar Datos")
-    uploaded_file = st.sidebar.file_uploader("Cargar archivo CSV de telemetría", type=["csv"])
+    uploaded_file = st.sidebar.file_uploader("Cargar archivo CSV de telemetría (iDirect/Sat)", type=["csv"])
     
-    # --- ENCABEZADO ---
-    col_h1, col_h2 = st.columns([1, 4])
-    with col_h1:
-        if os.path.exists("Meru Networks JPG Horizontal.jpg"):
-            st.image("Meru Networks JPG Horizontal.jpg", width=150)
-    with col_h2:
+    # --- HEADER ---
+    col_logo, col_title = st.columns([1, 5])
+    with col_title:
         st.title("Meru Intelligence Center")
-        st.caption("Sistema de Monitoreo Proactivo con Inteligencia Artificial")
+        st.caption("Dashboard de Monitoreo Proactivo con IA (Gemini 2.5 Flash)")
 
     st.divider()
 
     if uploaded_file is not None:
-        # --- PROCESAMIENTO DE ARCHIVO SUBIDO ---
         try:
-            df_csv = pd.read_csv(uploaded_file)
+            # Lectura del CSV
+            df = pd.read_csv(uploaded_file)
             st.success(f"✅ Archivo '{uploaded_file.name}' cargado correctamente.")
             
-            col1, col2 = st.columns([2, 1])
+            # Layout principal con CSV cargado
+            tab1, tab2 = st.tabs(["📊 Visualización de Datos", "🧠 Diagnóstico IA"])
             
-            with col1:
-                st.subheader("📊 Vista Previa de Datos")
-                st.dataframe(df_csv.head(10), use_container_width=True)
+            with tab1:
+                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                col_stat1.metric("Total Registros", len(df))
                 
-                if st.checkbox("Mostrar estadísticas descriptivas"):
-                    st.write(df_csv.describe())
+                # Intentar detectar columnas numéricas clave automáticamente
+                numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+                
+                with st.expander("Ver tabla completa de datos"):
+                    st.dataframe(df, use_container_width=True)
+                
+                if numeric_cols:
+                    st.subheader("📈 Análisis de Tendencias")
+                    c1, c2 = st.columns([1, 3])
+                    with c1:
+                        y_axis = st.selectbox("Seleccionar Métrica", options=numeric_cols)
+                        x_axis = st.selectbox("Eje Temporal / Índice", options=df.columns)
+                    with c2:
+                        fig = px.line(df, x=x_axis, y=y_axis, title=f"Evolución de {y_axis}", template="plotly_dark")
+                        fig.update_traces(line_color='#58a6ff')
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No se encontraron columnas numéricas para graficar.")
 
-            with col2:
-                st.subheader("🧠 Análisis de IA del CSV")
-                if st.button("Analizar CSV con IA", use_container_width=True):
-                    with st.spinner("La IA está leyendo y analizando el archivo..."):
-                        # Enviamos una muestra representativa (cabecera y estadisticas) para no saturar el prompt
-                        csv_sample = df_csv.describe().to_string() + "\n" + df_csv.head(20).to_string()
-                        analysis = call_gemini_analysis(csv_sample, is_csv=True)
-                        st.markdown(f'<div class="ai-response">{analysis}</div>', unsafe_allow_html=True)
-            
-            st.divider()
-            st.subheader("📈 Gráfico de Tendencias (CSV)")
-            numeric_cols = df_csv.select_dtypes(include=[np.number]).columns.tolist()
-            if len(numeric_cols) >= 2:
-                col_sel1 = st.selectbox("Eje X", options=df_csv.columns)
-                col_sel2 = st.selectbox("Eje Y (Métrica)", options=numeric_cols)
-                fig_csv = px.line(df_csv, x=col_sel1, y=col_sel2, markers=True, template="plotly_dark")
-                st.plotly_chart(fig_csv, use_container_width=True)
-            
+            with tab2:
+                st.subheader("Análisis Predictivo y de Salud")
+                st.info("La IA analizará las tendencias, estadísticas y anomalías dentro de los datos cargados.")
+                
+                if st.button("🚀 Iniciar Diagnóstico de Red con IA"):
+                    with st.spinner("Gemini está procesando la telemetría..."):
+                        # Extraemos una muestra representativa para no exceder límites de tokens
+                        # pero manteniendo la esencia estadística
+                        stats_summary = df.describe().to_string()
+                        head_sample = df.head(15).to_string()
+                        tail_sample = df.tail(15).to_string()
+                        
+                        data_payload = f"ESTADÍSTICAS GENERALES:\n{stats_summary}\n\nMUESTRA INICIAL:\n{head_sample}\n\nMUESTRA FINAL:\n{tail_sample}"
+                        
+                        analysis_result = call_gemini_analysis(data_payload, is_csv=True)
+                        
+                        st.markdown(f"""
+                        <div class="ai-response">
+                            <h3 style='margin-top:0;'>Reporte de Inteligencia Meru NOC</h3>
+                            {analysis_result}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Opción para descargar reporte
+                        st.download_button("Descargar Reporte IA", analysis_result, file_name="reporte_ia_meru.txt")
+
         except Exception as e:
-            st.error(f"Error al procesar el CSV: {e}")
-
+            st.error(f"Error al procesar el archivo: {str(e)}")
     else:
-        # --- VISTA POR DEFECTO (SIN ARCHIVO) ---
-        st.info("💡 Sube un archivo CSV en la barra lateral para iniciar el análisis profundo de datos.")
+        # Estado inicial si no hay archivo
+        st.warning("Esperando carga de datos de telemetría (CSV) en la barra lateral...")
         
-        # Datos simulados para mantener el dashboard vivo
-        df_sim = pd.DataFrame({
-            'Minutos': list(range(60)),
-            'EbNo': np.random.normal(12, 0.5, 60)
-        })
-        
+        # Dashboard demo simplificado
         c1, c2, c3 = st.columns(3)
-        c1.metric("Eb/No Actual", f"{df_sim['EbNo'].iloc[-1]:.2f} dB", "0.2")
-        c2.metric("Nodos Activos", "124/125", "-1")
-        c3.metric("Uptime Global", "99.98%", "0.01%")
+        c1.metric("Status Teleport", "ONLINE", delta="Stable")
+        c2.metric("Nodos en Alerta", "0", delta="0")
+        c3.metric("Promedio Eb/No (Pool)", "11.5 dB")
         
-        st.plotly_chart(px.area(df_sim, x='Minutos', y='EbNo', title="Señal Satelital (Simulada)", template="plotly_dark"), use_container_width=True)
+        # Simulación visual
+        chart_data = pd.DataFrame(np.random.randn(20, 1), columns=['EbNo'])
+        st.line_chart(chart_data)
 
 if __name__ == "__main__":
     main()
