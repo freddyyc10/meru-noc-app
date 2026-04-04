@@ -8,7 +8,4 @@ streamlit-option-menu
 openpyxl
 docxtpl
 python-docx
-sqlite3
-re
-datetime import datetime
-io import BytesIO
+google-generativeai
