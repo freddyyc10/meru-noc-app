@@ -3,25 +3,31 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+from datetime import datetime
 import requests
-import io
 
-# --- CONFIGURACIÓN DE IA ---
+# --- CONFIGURACIÓN DE MODELO ---
 MODEL_NAME = "gemini-2.5-flash-preview-09-2025"
-API_KEY = "TU_API_KEY_AQUÍ" 
+API_KEY = "TU_API_KEY" # Se recomienda usar st.secrets
 
-def query_meru_ia(prompt, context):
+# --- INICIALIZACIÓN DE BASE DE DATOS DE TICKETS ---
+if 'ticket_db' not in st.session_state:
+    st.session_state.ticket_db = pd.DataFrame(columns=[
+        "ID", "Fecha", "Estación", "Categoría", "Prioridad", "Descripción", "Estado"
+    ])
+
+# --- FUNCIONES DE SOPORTE ---
+def query_gemini_expert(prompt, context):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
     payload = {
-        "contents": [{"parts": [{"text": f"CONTEXTO TÉCNICO: {context}\n\nPREGUNTA OPERADOR: {prompt}"}]}],
-        "systemInstruction": {"parts": [{"text": "Eres el Core de IA de Meru Networks. Analizas telemetría satelital iDirect. Detectas saturación de ancho de banda, caídas de Eb/No por lluvia y anomalías en el Bit Rate."}]}
+        "contents": [{"parts": [{"text": f"SISTEMA NOC MERU. Contexto: {context}\n\nConsulta: {prompt}"}]}],
+        "systemInstruction": {"parts": [{"text": "Eres el Ingeniero Principal de Meru Networks. Analiza telemetría iDirect y genera reportes de incidentes."}]}
     }
     try:
         r = requests.post(url, json=payload, timeout=10)
         return r.json()['candidates'][0]['content']['parts'][0]['text']
-    except: return "⚠️ Error: Núcleo IA fuera de línea."
+    except: return "Error de conexión con el núcleo de inteligencia."
 
-# --- LÓGICA DE LIMPIEZA IDIRECT (Basada en tu código) ---
 def get_clean_df(file):
     content = file.getvalue().decode('utf-8', errors='ignore').splitlines()
     skip_rows = 0
@@ -30,111 +36,114 @@ def get_clean_df(file):
             skip_rows = i
             break
     file.seek(0)
-    try:
-        df = pd.read_csv(file, skiprows=skip_rows)
-        df.columns = [str(c).strip().replace('"', '') for c in df.columns]
-        return df
-    except: return pd.DataFrame()
+    df = pd.read_csv(file, skiprows=skip_rows)
+    df.columns = [str(c).strip().replace('"', '') for c in df.columns]
+    return df
 
-# --- CONFIGURACIÓN UI ---
-st.set_page_config(page_title="MERU INTELLIGENCE HUB", layout="wide", page_icon="📡")
+# --- INTERFAZ NOC (UI/UX) ---
+st.set_page_config(page_title="MERU COMMAND CENTER", layout="wide")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap');
-    .stApp { background-color: #02060a; color: #00f2ff; font-family: 'JetBrains Mono', monospace; }
-    .status-card { 
-        background: rgba(0, 212, 255, 0.05); border: 1px solid #00d4ff; 
-        padding: 20px; border-radius: 8px; text-align: center;
-    }
-    .metric-val { font-size: 2.2rem; font-weight: bold; color: #ffffff; text-shadow: 0 0 10px #00d4ff; }
+    .main { background-color: #010409; }
+    .stTabs [data-baseweb="tab-list"] { gap: 24px; background-color: #0d1117; padding: 10px; border-radius: 10px; }
+    .stTabs [data-baseweb="tab"] { color: #58a6ff; font-family: 'JetBrains Mono'; }
+    .ticket-card { background: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
+    .status-alert { color: #ff7b72; font-weight: bold; animation: blinker 1.5s linear infinite; }
+    @keyframes blinker { 50% { opacity: 0; } }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🛰️ MERU NETWORKS | COMMAND CENTER v5.0")
+# --- PANEL SUPERIOR ---
+st.title("🛰️ MERU GLOBAL OPERATIONS")
+tabs = st.tabs(["📊 Telemetría en Vivo", "🎫 Gestión de Tickets", "🧠 Inteligencia Core", "💾 Base de Datos"])
 
-# --- SIDEBAR: GESTIÓN DE ARCHIVOS ---
-with st.sidebar:
-    st.header("📥 DATA INGESTION")
-    files = st.file_uploader("Cargar reportes iDirect (Múltiples CSV)", type="csv", accept_multiple_files=True)
-    st.markdown("---")
-    st.subheader("⚙️ LINK SPECS")
-    freq = st.slider("Frecuencia (GHz)", 10.0, 30.0, 19.2)
-    st.caption("Soporte para reportes de Tráfico y Señal.")
-
-# --- PROCESAMIENTO CENTRAL ---
-if files:
-    all_data = []
-    summary_for_ia = ""
-
-    for f in files:
-        df = get_clean_df(f)
-        if df.empty: continue
-        
-        cols_text = " ".join(df.columns).lower()
-        is_traffic = any(k in cols_text for k in ["octets", "bit rate"])
-        
-        # --- MÓDULO 1: ANÁLISIS DE TRÁFICO (Basado en tu app (1).py) ---
-        if is_traffic:
-            st.subheader(f"📊 Análisis de Consumo: {f.name}")
-            sites = sorted(list(set([c.split('/')[0] for c in df.columns if '/' in c])))
-            report = []
-            for s in sites:
-                in_c = next((c for c in df.columns if c.startswith(s + "/") and any(k in c for k in ["In", "FL"])), None)
-                out_c = next((c for c in df.columns if c.startswith(s + "/") and any(k in c for k in ["Out", "RL"])), None)
-                if in_c or out_c:
-                    val_in = pd.to_numeric(df[in_c], errors='coerce').sum() if in_c else 0
-                    val_out = pd.to_numeric(df[out_c], errors='coerce').sum() if out_c else 0
-                    factor = (1024*1024) if "Octets" in str(in_c or out_c) else 1
-                    report.append({"Estación": s, "In": val_in/factor, "Out": val_out/factor, "Total": (val_in+val_out)/factor})
-            
-            if report:
-                res_df = pd.DataFrame(report).sort_values(by="Total", ascending=False)
-                c1, c2 = st.columns(2)
-                c1.plotly_chart(px.bar(res_df.head(10), x="Total", y="Estación", orientation='h', title="Top 10 Consumo", color_discrete_sequence=['#00d4ff']), use_container_width=True)
-                c2.dataframe(res_df, use_container_width=True)
-                summary_for_ia += f"Archivo {f.name} (Tráfico): Total {res_df['Total'].sum():.2f}. "
-
-        # --- MÓDULO 2: ANÁLISIS DE SEÑAL Y EB/NO (Multi-CSV) ---
-        else:
-            st.subheader(f"📶 Histórico de Señal: {f.name}")
-            stations = sorted(list(set([c.split('/')[0] for c in df.columns if '/' in c])))
-            selected = st.selectbox(f"Seleccione Estación ({f.name}):", stations)
-            
-            plot_cols = [c for c in df.columns if c.startswith(selected + "/")]
-            time_col = next((c for c in df.columns if "Date" in c or "Time" in c), None)
-            
-            fig = go.Figure()
-            for c in plot_cols:
-                fig.add_trace(go.Scatter(x=df[time_col] if time_col else df.index, y=df[c], name=c.split('/')[-1]))
-            
-            fig.update_layout(template="plotly_dark", height=350, margin=dict(t=20, b=20), paper_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Cálculo de FSPL dinámico
-            fspl = 20 * np.log10(35786) + 20 * np.log10(freq) + 92.45
-            st.write(f"**Pérdida de Espacio Libre (FSPL) calculada para {freq} GHz:** {fspl:.2f} dB")
-            summary_for_ia += f"Archivo {f.name} (Señal): Estación {selected} analizada a {freq}GHz. "
-
-    # --- MÓDULO 3: TERMINAL DE INTELIGENCIA ARTIFICIAL ---
-    st.markdown("---")
-    st.subheader("🧠 Meru AI Core: Análisis Predictivo")
-    query = st.text_input("Consultar anomalías o Link Budget a la IA:", placeholder="Ej: ¿Hay riesgo de Rain Fade en la estación seleccionada?")
+# --- TAB 1: TELEMETRÍA Y ANÁLISIS CSV ---
+with tabs[0]:
+    col_side, col_main = st.columns([1, 4])
     
-    if st.button("EJECUTAR ANÁLISIS NEURAL"):
-        if query:
-            with st.spinner("Analizando telemetría..."):
-                respuesta = query_meru_ia(query, summary_for_ia)
-                st.info(respuesta)
-        else: st.warning("Escriba una pregunta técnica.")
+    with col_side:
+        st.subheader("Ingesta de Datos")
+        files = st.file_uploader("Cargar statistics.csv", accept_multiple_files=True)
+        freq_ref = st.number_input("Freq Ref (GHz)", 19.2)
 
-else:
-    # Pantalla de inicio llamativa
-    st.markdown("""
-        <div style="text-align:center; padding:100px;">
-            <h2 style="color:#00d4ff;">ESPERANDO INGESTIÓN DE DATOS</h2>
-            <p style="opacity:0.5;">Cargue los reportes iDirect CSV en la barra lateral para iniciar el comando.</p>
-        </div>
-    """, unsafe_allow_html=True)
+    if files:
+        for f in files:
+            df = get_clean_df(f)
+            with col_main:
+                st.markdown(f"### 📡 Análisis: {f.name}")
+                stations = sorted(list(set([c.split('/')[0] for c in df.columns if '/' in c])))
+                
+                # Resumen rápido
+                c1, c2, c3 = st.columns(3)
+                # Detección de tipo de reporte
+                is_traffic = "Octets" in " ".join(df.columns)
+                
+                if is_traffic:
+                    total_traffic = 0
+                    for s in stations:
+                        col_in = next((c for c in df.columns if c.startswith(s + "/") and "In" in c), None)
+                        if col_in: total_traffic += pd.to_numeric(df[col_in], errors='coerce').sum()
+                    c1.metric("Tráfico Total", f"{total_traffic/(1024*1024):.2f} MB")
+                
+                # Gráfico Evolutivo
+                target_station = st.selectbox(f"Estación foco ({f.name})", stations)
+                plot_cols = [c for c in df.columns if c.startswith(target_station + "/")]
+                fig = px.line(df, y=plot_cols, title=f"Series de Tiempo: {target_station}")
+                fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig, use_container_width=True)
 
-st.markdown("<p style='text-align:center; opacity:0.2; font-size:10px;'>SECURED BY MERU NETWORKS SECURITY SYSTEM</p>", unsafe_allow_html=True)
+# --- TAB 2: SISTEMA DE TICKETS (NUEVO) ---
+with tabs[1]:
+    st.header("🎫 Registro de Incidentes (Tickets)")
+    
+    with st.expander("➕ Crear Nuevo Ticket"):
+        with st.form("new_ticket"):
+            t_estacion = st.text_input("Estación Afectada")
+            t_cat = st.selectbox("Categoría", ["Eb/No Bajo", "Saturación BW", "Outage Total", "Falla de Hardware"])
+            t_pri = st.select_slider("Prioridad", ["Baja", "Media", "Alta", "CRÍTICA"])
+            t_desc = st.text_area("Descripción del problema")
+            if st.form_submit_button("Generar Ticket"):
+                new_id = f"TIC-{len(st.session_state.ticket_db)+1001}"
+                new_row = {
+                    "ID": new_id, "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "Estación": t_estacion, "Categoría": t_cat, "Prioridad": t_pri,
+                    "Descripción": t_desc, "Estado": "Abierto"
+                }
+                st.session_state.ticket_db = pd.concat([st.session_state.ticket_db, pd.DataFrame([new_row])], ignore_index=True)
+                st.success(f"Ticket {new_id} registrado exitosamente.")
+
+    # Visualización de Tickets
+    st.subheader("Tickets Activos")
+    if not st.session_state.ticket_db.empty:
+        for _, row in st.session_state.ticket_db.iterrows():
+            color = "red" if row['Prioridad'] == "CRÍTICA" else "orange"
+            st.markdown(f"""
+                <div class="ticket-card">
+                    <span style="color:{color}">● {row['ID']}</span> | <b>{row['Estación']}</b> | {row['Fecha']} <br>
+                    <small>{row['Categoría']} - {row['Prioridad']}</small><br>
+                    <i>{row['Descripción']}</i>
+                </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.write("No hay tickets pendientes.")
+
+# --- TAB 3: IA EXPERT ---
+with tabs[2]:
+    st.header("🧠 Meru AI Analysis")
+    user_p = st.text_area("Describa el problema observado para diagnóstico de IA:")
+    if st.button("Consultar Núcleo"):
+        contexto = f"Tickets activos: {len(st.session_state.ticket_db)}. Última telemetría analizada."
+        respuesta = query_gemini_expert(user_p, contexto)
+        st.write(respuesta)
+
+# --- TAB 4: BASE DE DATOS ---
+with tabs[3]:
+    st.header("💾 Exportar Base de Datos")
+    st.write("Historial de operaciones acumulado:")
+    st.dataframe(st.session_state.ticket_db, use_container_width=True)
+    
+    csv_tickets = st.session_state.ticket_db.to_csv(index=False).encode('utf-8')
+    st.download_button("Descargar Base de Datos de Tickets", csv_tickets, "tickets_meru.csv", "text/csv")
+
+st.markdown("<p style='text-align:center; opacity:0.3; margin-top:50px;'>MERU NETWORKS NOC - OPERATIONAL SECURE SYSTEM</p>", unsafe_allow_html=True)
