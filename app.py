@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import streamlit.components.v1 as components
 import json
 import io
+import requests
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
@@ -13,26 +14,46 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- CONFIGURACIÓN DE API GEMINI ---
+apiKey = "" # La plataforma inyectará el key automáticamente
+
+def call_gemini_analysis(data_summary):
+    """Llamada a Gemini para analizar los datos del NOC"""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={apiKey}"
+    
+    prompt = f"""
+    Eres un experto en redes satelitales iDirect. Analiza el siguiente resumen de tráfico y estado de estaciones:
+    {data_summary}
+    
+    Proporciona:
+    1. Identificación de anomalías (estaciones con tráfico inusual o caídas).
+    2. Recomendaciones técnicas para optimizar el ancho de banda.
+    3. Un resumen ejecutivo para la gerencia de Meru Networks.
+    Responde en español de forma profesional.
+    """
+    
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    
+    try:
+        # Implementación simple de reintento/backoff no incluida para brevedad pero recomendada
+        response = requests.post(url, json=payload)
+        result = response.json()
+        return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "No se pudo generar el análisis.")
+    except Exception as e:
+        return f"Error conectando con la IA: {str(e)}"
+
 # --- ESTILOS PERSONALIZADOS ---
 st.markdown("""
     <style>
-    .main {
-        background-color: #0f172a;
-    }
-    .stMetric {
-        background-color: #1e293b;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #334155;
-    }
-    [data-testid="stHeader"] {
-        background-color: rgba(15, 23, 42, 0.8);
-    }
+    .main { background-color: #0f172a; }
+    .stMetric { background-color: #1e293b; padding: 15px; border-radius: 10px; border: 1px solid #334155; }
+    div[data-testid="stExpander"] { border: 1px solid #334155; background-color: #1e293b; }
     </style>
 """, unsafe_allow_html=True)
 
 def get_clean_df(file):
-    """Limpia el CSV saltando metadatos de iDirect hasta encontrar la cabecera"""
     content = file.getvalue().decode('utf-8', errors='ignore').splitlines()
     skip_rows = 0
     for i, line in enumerate(content):
@@ -49,13 +70,11 @@ def get_clean_df(file):
         return pd.DataFrame()
 
 def render_react_noc(nodes_data):
-    """
-    Renderiza el panel visual estilo NOC.
-    Se usa un string normal y .replace para evitar errores de llaves en f-strings de Python.
-    """
+    """Renderiza el panel visual estilo NOC sin errores de llaves"""
     json_data = json.dumps(nodes_data)
     
-    html_template = """
+    # Usamos constantes de JS para evitar conflictos con llaves de Python
+    html_content = """
     <!DOCTYPE html>
     <html>
     <head>
@@ -63,45 +82,34 @@ def render_react_noc(nodes_data):
         <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
         <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
         <script src="https://cdn.tailwindcss.com"></script>
-        <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
     </head>
-    <body class="bg-[#0f172a] text-white">
+    <body class="bg-[#0f172a]">
         <div id="root"></div>
         <script type="text/babel">
-            const { motion } = FramerMotion;
-
             const NodeCard = ({ node }) => (
-                <motion.div 
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="bg-slate-800/50 border border-slate-700 p-4 rounded-xl shadow-xl"
-                >
+                <div class="bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-lg m-2">
                     <div class="flex justify-between items-center mb-2">
-                        <span class="text-[10px] font-mono text-blue-400">{node.id}</span>
-                        <div class="flex items-center gap-2">
-                            <div class={`h-2.5 w-2.5 rounded-full ${node.status === 'online' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-rose-500 shadow-[0_0_8px_#f43f5e]'}`}></div>
-                            <span class="text-[10px] uppercase font-bold text-slate-400">{node.status}</span>
-                        </div>
+                        <span class="text-[10px] font-mono text-blue-400">ID: {node.id}</span>
+                        <div class={`h-3 w-3 rounded-full ${node.status === 'online' ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-rose-500'}`}></div>
                     </div>
-                    <h3 class="text-md font-bold text-white truncate">{node.name}</h3>
-                    <div class="text-[10px] text-slate-500 font-mono mb-3">IP: {node.ip}</div>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div class="bg-slate-900/80 p-2 rounded border border-slate-700 text-center">
-                            <div class="text-[9px] text-slate-500 uppercase">Latencia</div>
-                            <div class="text-sm font-mono text-emerald-400">{node.latency}ms</div>
-                        </div>
-                        <div class="bg-slate-900/80 p-2 rounded border border-slate-700 text-center">
+                    <h3 class="text-white font-bold truncate">{node.name}</h3>
+                    <div class="grid grid-cols-2 gap-2 mt-3">
+                        <div class="bg-slate-900 p-2 rounded text-center">
                             <div class="text-[9px] text-slate-500 uppercase">Carga</div>
-                            <div class="text-sm font-mono text-blue-400">{node.load}%</div>
+                            <div class="text-sm font-mono text-emerald-400">{node.load}%</div>
+                        </div>
+                        <div class="bg-slate-900 p-2 rounded text-center">
+                            <div class="text-[9px] text-slate-500 uppercase">Tráfico</div>
+                            <div class="text-sm font-mono text-blue-400">{node.traffic}</div>
                         </div>
                     </div>
-                </motion.div>
+                </div>
             );
 
             const App = () => {
                 const nodes = DATA_PLACEHOLDER;
                 return (
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-2">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
                         {nodes.map((n, i) => <NodeCard key={i} node={n} />)}
                     </div>
                 );
@@ -112,95 +120,88 @@ def render_react_noc(nodes_data):
         </script>
     </body>
     </html>
-    """
-    final_html = html_template.replace("DATA_PLACEHOLDER", json_data)
-    components.html(final_html, height=500, scrolling=True)
+    """.replace("DATA_PLACEHOLDER", json_data)
+    
+    components.html(html_content, height=450, scrolling=True)
 
 def main():
-    # --- HEADER CON LOGO ---
-    col_logo, col_title = st.columns([1, 4])
-    with col_logo:
-        # Nota: Usamos una URL de placeholder o el logo si estuviera accesible localmente
-        st.image("https://raw.githubusercontent.com/fmarcano/meru-noc-app/main/logo.png", width=200, 
-                 caption="Meru Networks", output_format="PNG")
-    
-    with col_title:
-        st.title("📡 Sistema de Monitoreo NOC")
-        st.write("Visualización de Telemetría y Consumo en Tiempo Real")
+    # --- LOGO Y CABECERA ---
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        # Usamos la ruta local que mencionaste en GitHub
+        try:
+            st.image("Meru Networks JPG Horizontal.jpg", width=300)
+        except:
+            st.markdown("### MERU NETWORKS")
+
+    with col2:
+        st.title("Sistema de Monitoreo NOC v2.5")
+        st.write("Visualización Inteligente y Análisis de Telemetría")
 
     # --- BARRA LATERAL ---
     st.sidebar.title("Configuración")
-    files = st.sidebar.file_uploader("Subir reportes CSV", type="csv", accept_multiple_files=True)
+    files = st.sidebar.file_uploader("Subir reportes CSV de iDirect", type="csv", accept_multiple_files=True)
 
     if not files:
-        st.info("👋 Bienvenid@. Por favor, cargue archivos CSV en el panel lateral para comenzar.")
-        
-        # Dashboard vacío/ejemplo
-        mock_nodes = [
-            {"id": "GW-MAIN", "name": "Telepuerto Principal", "ip": "10.0.0.1", "status": "online", "latency": 15, "load": 42},
-            {"id": "ST-001", "name": "Estación Sur", "ip": "10.0.5.12", "status": "online", "latency": 620, "load": 18},
-            {"id": "ST-002", "name": "Estación Norte (Babel)", "ip": "10.0.5.13", "status": "offline", "latency": 0, "load": 0}
-        ]
-        st.subheader("Estado de Red (Demo)")
-        render_react_noc(mock_nodes)
+        st.info("💡 Suba archivos CSV de estadísticas para activar el análisis.")
         return
 
-    # --- PROCESAMIENTO DE ARCHIVOS ---
     for f in files:
-        with st.expander(f"📁 Análisis de: {f.name}", expanded=True):
+        with st.expander(f"📊 Análisis: {f.name}", expanded=True):
             df = get_clean_df(f)
             if df.empty: continue
             
             all_cols = df.columns.tolist()
             cols_text = " ".join(all_cols).lower()
 
-            # Caso A: Reporte de Consumo (Octetos/Bits)
-            if any(k in cols_text for k in ["octets", "bit rate", "fl bit", "rl bit"]):
+            # Lógica para reportes de consumo
+            if any(k in cols_text for k in ["octets", "bit rate"]):
                 sites = sorted(list(set([c.split('/')[0] for c in all_cols if '/' in c])))
-                report_data = []
-                
+                nodes_for_ui = []
+                summary_text = ""
+
                 for s in sites:
                     in_c = next((c for c in all_cols if c.startswith(s + "/") and any(k in c for k in ["In", "FL"])), None)
                     out_c = next((c for c in all_cols if c.startswith(s + "/") and any(k in c for k in ["Out", "RL"])), None)
                     
-                    if in_c or out_c:
-                        val_in = pd.to_numeric(df[in_c], errors='coerce').sum() if in_c else 0
-                        val_out = pd.to_numeric(df[out_c], errors='coerce').sum() if out_c else 0
-                        is_bytes = "Octets" in str(in_c or out_c)
-                        factor = (1024 * 1024) if is_bytes else 1
-                        
-                        report_data.append({
-                            "id": s[:8],
-                            "name": s,
-                            "ip": "DHCP/Static",
-                            "status": "online" if (val_in + val_out) > 0 else "offline",
-                            "latency": int(df.iloc[-1].get('Latency', 0)) if 'Latency' in df.columns else 0,
-                            "load": round((val_in / (val_in + val_out + 1)) * 100, 1) if (val_in + val_out) > 0 else 0
-                        })
+                    val_in = pd.to_numeric(df[in_c], errors='coerce').sum() if in_c else 0
+                    val_out = pd.to_numeric(df[out_c], errors='coerce').sum() if out_c else 0
+                    total = val_in + val_out
+                    
+                    nodes_for_ui.append({
+                        "id": s[:5],
+                        "name": s,
+                        "status": "online" if total > 0 else "offline",
+                        "load": round((val_in / (total + 1)) * 100, 1) if total > 0 else 0,
+                        "traffic": f"{round(total/1024/1024, 2)}MB" if "Octets" in str(in_c) else f"{round(total, 0)}bps"
+                    })
+                    summary_text += f"Estación {s}: In={val_in}, Out={val_out}. "
 
-                # Mostrar visualización React
-                render_react_noc(report_data)
+                # Mostrar Interfaz React
+                render_react_noc(nodes_for_ui)
 
-                # Gráfico Plotly
-                res_df = pd.DataFrame(report_data)
-                fig = px.bar(res_df, x="name", y="load", title="Carga de Red por Estación",
-                             color_discrete_sequence=['#3b82f6'])
-                fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="white")
+                # --- BOTÓN DE IA CON GEMINI ---
+                st.divider()
+                st.subheader("🤖 Consultoría con IA (Gemini)")
+                if st.button(f"Analizar tendencias de {f.name} con Gemini", key=f"btn_{f.name}"):
+                    with st.spinner("Gemini está analizando los patrones de red..."):
+                        analisis = call_gemini_analysis(summary_text[:2000]) # Límite de texto para seguridad
+                        st.markdown(f"**Análisis de la IA:**\n\n{analisis}")
+                
+                # Gráfico complementario
+                fig = px.pie(pd.DataFrame(nodes_for_ui), values='load', names='name', title="Distribución de Carga")
+                fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color="white")
                 st.plotly_chart(fig, use_container_width=True)
 
-            # Caso B: Reporte de Señal (Eb/No, Power)
             else:
-                st.subheader("📶 Histórico de Señal")
+                # Reporte de señal (Eb/No)
+                st.subheader("📈 Niveles de Señal (Eb/No / Power)")
                 stations = sorted(list(set([c.split('/')[0] for c in all_cols if '/' in c])))
-                selected = st.selectbox("Seleccione Estación:", stations, key=f"sel_{f.name}")
-                
+                selected = st.selectbox("Estación:", stations, key=f"sig_{f.name}")
                 if selected:
                     plot_cols = [c for c in all_cols if c.startswith(selected + "/")]
-                    fig = go.Figure()
-                    for c in plot_cols:
-                        fig.add_trace(go.Scatter(x=df.index, y=df[c], name=c.split('/')[-1]))
-                    
-                    fig.update_layout(template="plotly_dark", title=f"Métricas: {selected}")
+                    fig = px.line(df, y=plot_cols, title=f"Histórico: {selected}")
+                    fig.update_layout(template="plotly_dark")
                     st.plotly_chart(fig, use_container_width=True)
 
 if __name__ == "__main__":
