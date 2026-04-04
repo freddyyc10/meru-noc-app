@@ -10,142 +10,150 @@ import time
 import io
 
 # --- CONFIGURACIÓN DE LA PLATAFORMA ---
-API_KEY = ""  # Se inyecta automáticamente en el entorno
+API_KEY = ""  # El entorno inyecta la clave automáticamente
 MODEL_TEXT = "gemini-2.5-flash-preview-09-2025"
-MODEL_IMAGE = "gemini-2.5-flash-image-preview"
+MODEL_IMAGE = "gemini-2.5-flash-preview-09-2025"
 
-# --- FUNCIONES DE ANÁLISIS LOCAL ---
+# --- FUNCIONES DE ANÁLISIS ---
+
 def detect_anomalies(data):
-    """Detecta anomalías usando Z-Score (desviación estándar)."""
+    """Detecta anomalías estadísticas usando Z-Score."""
     mean = np.mean(data)
     std = np.std(data)
-    if std < 0.001: return [] # Evitar división por cero
+    if std < 0.001: return []
     z_scores = [(y - mean) / std for y in data]
-    return np.where(np.abs(z_scores) > 2.5)[0]
+    return np.where(np.abs(z_scores) > 2.2)[0]
 
-# --- NUEVO MOTOR VISUAL ROBUSTO (SIN KALEIDO) ---
-def analyze_with_visual_ai(df, metric_name):
+def analyze_with_ai(df, metric_name, prompt_custom=None):
+    """Genera un análisis de texto basado en los datos estadísticos."""
+    resumen = df[metric_name].describe().to_json()
+    ultimos = df[metric_name].tail(10).to_string()
+    
+    contexto = f"""
+    Métrica analizada: {metric_name}
+    Estadísticas: {resumen}
+    Últimos valores: {ultimos}
+    Pregunta: {prompt_custom if prompt_custom else "Realiza un diagnóstico técnico."}
     """
-    Usa Matplotlib para generar la imagen de forma estable 
-    y la envía a Gemini para visión artificial.
-    """
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_TEXT}:generateContent?key={API_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": contexto}]}],
+        "systemInstruction": {"parts": [{"text": "Eres el experto en redes de Meru NOC. Analiza los datos y da soluciones técnicas."}]}
+    }
+    
     try:
-        # 1. Crear el gráfico técnico usando Matplotlib (altamente estable)
-        plt.style.use('dark_background')
-        fig_plt, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(df.index, df[metric_name], color='#00ff00', linewidth=1.5)
-        ax.set_title(f"Network Telemetry: {metric_name}", color='#00d4ff')
-        ax.grid(True, alpha=0.2)
-        
-        # Guardar en buffer de memoria
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', bbox_inches='tight')
-        plt.close(fig_plt)
-        buf.seek(0)
-        
-        base64_image = base64.b64encode(buf.read()).decode('utf-8')
+        res = requests.post(url, json=payload, timeout=20)
+        return res.json()['candidates'][0]['content']['parts'][0]['text']
+    except:
+        return "Error consultando al cerebro de IA."
 
-        # 2. Llamada a Gemini Image
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_IMAGE}:generateContent?key={API_KEY}"
-        
-        prompt = f"""
-        Actúa como un experto en ciberseguridad. Analiza esta gráfica de tráfico de red ({metric_name}).
-        - ¿Ves picos que sugieran ataques DDoS o escaneos?
-        - ¿La tendencia es normal o hay degradación?
-        Responde en español de forma profesional y técnica.
-        """
+def analyze_visual_patterns(df, metric_name):
+    """Crea una imagen del gráfico y la envía a la IA para análisis de visión."""
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(df.index, df[metric_name], color='#00d4ff', linewidth=2)
+    ax.set_title(f"Visual Pattern Scan: {metric_name}")
+    ax.grid(True, alpha=0.1)
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    plt.close(fig)
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
 
-        payload = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {"inlineData": {"mimeType": "image/png", "data": base64_image}}
-                ]
-            }]
-        }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_IMAGE}:generateContent?key={API_KEY}"
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": "Analiza visualmente esta gráfica de red. ¿Ves comportamientos sospechosos como ataques DDoS, jitter excesivo o caídas periódicas? Responde técnico en español."},
+                {"inlineData": {"mimeType": "image/png", "data": img_base64}}
+            ]
+        }]
+    }
+    
+    try:
+        res = requests.post(url, json=payload, timeout=25)
+        return res.json()['candidates'][0]['content']['parts'][0]['text']
+    except:
+        return "El motor de visión no pudo procesar la imagen actual."
 
-        # Reintentos con Backoff
-        for delay in [1, 2]:
-            res = requests.post(url, json=payload, timeout=30)
-            if res.status_code == 200:
-                return res.json()['candidates'][0]['content']['parts'][0]['text']
-            time.sleep(delay)
-            
-        return "⚠️ Error de comunicación con el motor de IA."
-    except Exception as e:
-        return f"❌ Error en el motor de visión: {str(e)}"
+# --- INTERFAZ STREAMLIT ---
+st.set_page_config(page_title="Meru NOC AI", layout="wide", page_icon="📡")
 
-# --- INTERFAZ DE USUARIO ---
-st.set_page_config(page_title="Meru Intel Center", layout="wide", page_icon="📡")
-
-# Estilos CSS
 st.markdown("""
     <style>
-    .stApp { background-color: #0b0f19; color: #e0e6ed; }
-    .status-bar { padding: 10px; border-radius: 5px; background: #1a2234; border-left: 5px solid #00d4ff; }
+    .main { background-color: #0d1117; }
+    .stMetric { background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; }
+    .ai-box { background-color: #051525; border-left: 4px solid #58a6ff; padding: 20px; border-radius: 8px; color: #adbac7; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📡 Meru Network Intelligence")
-st.markdown('<div class="status-bar">SISTEMA DE ANÁLISIS HÍBRIDO (ESTADÍSTICO + VISIÓN ARTIFICIAL)</div>', unsafe_allow_html=True)
-st.write("")
+st.title("📡 Meru NOC Intelligence Center")
+st.caption("Importación de CSV + Diagnóstico Híbrido por IA")
 
-# Panel Lateral
-st.sidebar.header("Control de Telemetría")
-uploaded_file = st.sidebar.file_uploader("Subir Log de Red (CSV)", type="csv")
+# Sidebar
+with st.sidebar:
+    st.header("Entrada de Datos")
+    file = st.file_uploader("Cargar CSV de Red", type="csv")
+    if file:
+        st.success("Archivo listo para procesar")
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+if file:
+    df = pd.read_csv(file)
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     
     if not numeric_cols:
-        st.error("El archivo no contiene columnas numéricas para analizar.")
+        st.error("No hay datos numéricos en el archivo.")
     else:
-        selected_metric = st.sidebar.selectbox("Métrica a Monitorear", numeric_cols)
+        # Dashboard Principal
+        col1, col2, col3 = st.columns(3)
+        selected_metric = st.selectbox("Seleccione Métrica para Monitoreo", numeric_cols)
         
-        col_viz, col_ai = st.columns([2, 1])
+        idx_anom = detect_anomalies(df[selected_metric])
         
-        with col_viz:
-            st.subheader("Visualización en Tiempo Real")
-            indices_anomalias = detect_anomalies(df[selected_metric])
-            
-            # Gráfico interactivo para el humano
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df.index, y=df[selected_metric], name="Flujo", line=dict(color='#00d4ff', width=2)))
-            
-            if len(indices_anomalias) > 0:
-                fig.add_trace(go.Scatter(
-                    x=indices_anomalias, 
-                    y=df[selected_metric].iloc[indices_anomalias],
-                    mode='markers', name='ANOMALÍA',
-                    marker=dict(color='#ff4b4b', size=10, symbol='circle-open')
-                ))
-            
-            fig.update_layout(template="plotly_dark", height=500, margin=dict(l=0,r=0,t=30,b=0))
-            st.plotly_chart(fig, use_container_width=True)
+        col1.metric("Valor Actual", f"{df[selected_metric].iloc[-1]:.2f}")
+        col2.metric("Promedio de Sesión", f"{df[selected_metric].mean():.2f}")
+        col3.metric("Anomalías Detectadas", len(idx_anom), delta_color="inverse" if len(idx_anom) > 0 else "normal")
 
-        with col_ai:
-            st.subheader("Cerebro IA")
-            if st.button("🔍 Analizar Patrones Visuales", use_container_width=True):
-                with st.spinner("Escaneando gráfico con Visión Artificial..."):
-                    analisis = analyze_with_visual_ai(df, selected_metric)
-                    st.markdown(f"**Diagnóstico:**\n\n{analisis}")
-            
-            st.divider()
-            st.metric("Promedio de Carga", f"{df[selected_metric].mean():.2f}")
-            st.metric("Eventos Críticos", len(indices_anomalias))
-            
-            if len(indices_anomalias) > 0:
-                st.warning(f"Se han detectado {len(indices_anomalias)} puntos fuera de la desviación estándar permitida.")
+        # Gráfico con Plotly
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df.index, y=df[selected_metric], name="Flujo de Red", line=dict(color='#58a6ff', width=2)))
+        
+        if len(idx_anom) > 0:
+            fig.add_trace(go.Scatter(x=idx_anom, y=df[selected_metric].iloc[idx_anom], mode='markers', 
+                                    marker=dict(color='#f85149', size=8), name="Anomalía Critica"))
+        
+        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=0,r=0,t=20,b=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Zona de Inteligencia Artificial
+        st.divider()
+        st.subheader("🤖 Diagnóstico Asistido por IA")
+        
+        tab1, tab2 = st.tabs(["💬 Consultar a la IA", "👁️ Escaneo Visual de Patrones"])
+        
+        with tab1:
+            q = st.text_input("Hazle una pregunta a la IA sobre los logs:", placeholder="¿Qué causó el pico de tráfico observado?")
+            if st.button("Ejecutar Análisis de Texto"):
+                with st.spinner("Procesando telemetría..."):
+                    ans = analyze_with_ai(df, selected_metric, q)
+                    st.markdown(f'<div class="ai-box">{ans}</div>', unsafe_allow_html=True)
+        
+        with tab2:
+            st.info("La IA analizará la forma del gráfico para detectar comportamientos no lineales.")
+            if st.button("Iniciar Visión Artificial"):
+                with st.spinner("Escaneando formas de onda..."):
+                    ans_v = analyze_visual_patterns(df, selected_metric)
+                    st.markdown(f'<div class="ai-box"><b>Análisis Visual de IA:</b><br><br>{ans_v}</div>', unsafe_allow_html=True)
 
 else:
-    # Pantalla de bienvenida
-    st.info("👋 Bienvenido al Centro de Inteligencia. Por favor, sube un archivo CSV para comenzar el análisis.")
-    
-    if st.button("Generar Datos de Simulación"):
-        t = np.arange(0, 100)
-        # Ruido normal + un ataque masivo a la mitad
-        y = np.random.normal(20, 2, 100)
-        y[40:50] = y[40:50] * 5 # Pico de ataque
-        sim_df = pd.DataFrame({'segundos': t, 'trafico_mbps': y})
-        st.download_button("Descargar Archivo de Prueba", sim_df.to_csv(index=False), "test_network.csv")
+    # Pantalla de espera
+    st.info("Esperando carga de archivo CSV para inicializar el NOC...")
+    st.image("https://img.icons8.com/fluency/200/combo-chart.png", width=120)
+    if st.button("Generar CSV de prueba para Meru"):
+        t = np.linspace(0, 24, 100)
+        y = 50 + 10*np.sin(t) + np.random.normal(0, 2, 100)
+        y[50:55] = y[50:55] * 3 # Simular pico de ataque
+        test_df = pd.DataFrame({'Hora': t, 'Latencia_ms': y, 'Trafico_Mbps': y*0.8})
+        st.download_button("Descargar CSV de Prueba", test_df.to_csv(index=False), "log_red_meru.csv")
