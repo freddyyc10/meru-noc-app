@@ -14,8 +14,12 @@ apiKey = ""
 
 def call_gemini_analysis(data_summary):
     """Llamada a Gemini 2.5 Flash para análisis de red con Backoff Exponencial"""
-    system_prompt = "Eres el Ingeniero Senior de Meru NOC. Analiza los datos de telemetría y da un diagnóstico técnico breve y acciones correctivas."
-    user_query = f"Datos actuales de red: {data_summary}. ¿Qué problemas detectas y qué sugieres?"
+    system_prompt = (
+        "Eres el Ingeniero Senior de Inteligencia Artificial de Meru NOC. "
+        "Analiza los datos técnicos de telemetría satelital. Sé preciso, técnico y ofrece "
+        "una recomendación de mitigación inmediata si los valores están fuera de rango (EbNo < 10)."
+    )
+    user_query = f"REPORTE DE TELEMETRÍA ACTUAL: {data_summary}. Diagnóstico técnico:"
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={apiKey}"
     payload = {
@@ -26,14 +30,15 @@ def call_gemini_analysis(data_summary):
     retries = 5
     for i in range(retries):
         try:
-            response = requests.post(url, json=payload)
-            if response.status_status == 200:
+            response = requests.post(url, json=payload, timeout=10)
+            if response.status_code == 200:
                 result = response.json()
-                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "Sin respuesta de IA.")
+                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "Análisis completado sin observaciones.")
+            # Backoff exponencial: 1s, 2s, 4s, 8s, 16s
             time.sleep(2**i)
-        except:
+        except Exception:
             time.sleep(2**i)
-    return "Error de conexión con el núcleo de IA."
+    return "⚠️ Error de enlace con el núcleo de IA. Verifique conexión del NOC."
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
@@ -42,104 +47,118 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- ESTILOS PERSONALIZADOS ---
+# --- ESTILOS Y LOGO ---
 st.markdown("""
     <style>
     .main { background-color: #0b0e14; color: #e6edf3; }
     .stMetric { background-color: #161b22; border: 1px solid #30363d; padding: 20px; border-radius: 12px; }
     .ai-box { 
-        background: linear-gradient(145deg, #161b22, #0d1117);
+        background: linear-gradient(145deg, #0d1117, #161b22);
         border: 1px solid #388bfd;
-        padding: 20px;
+        padding: 25px;
         border-radius: 15px;
-        margin-top: 20px;
-        box-shadow: 0 0 15px rgba(56, 139, 253, 0.2);
+        margin-top: 10px;
+        box-shadow: 0 4px 20px rgba(56, 139, 253, 0.15);
     }
-    .logo-img { max-height: 80px; margin-bottom: 10px; }
+    .status-badge {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- GENERACIÓN DE DATOS ---
-def get_data():
+# Generación de datos simulados realistas
+@st.cache_data(ttl=10)
+def get_telemetry_data():
     now = datetime.now()
-    return pd.DataFrame({
-        'Timestamp': [now - timedelta(minutes=i) for i in range(50, 0, -1)],
-        'EbNo': np.random.uniform(8.0, 13.0, 50),
-        'Latency': np.random.uniform(540, 720, 50),
-        'PacketLoss': np.random.uniform(0, 2.5, 50),
-        'Traffic': np.random.uniform(20, 150, 50)
+    df = pd.DataFrame({
+        'Timestamp': [now - timedelta(minutes=i) for i in range(60, 0, -1)],
+        'EbNo': np.random.normal(11.5, 0.8, 60),
+        'Latency': np.random.normal(580, 25, 60),
+        'PacketLoss': np.random.uniform(0, 1.2, 60),
+        'Throughput': np.random.uniform(80, 120, 60)
     })
+    return df
 
 def main():
-    df = get_data()
+    df = get_telemetry_data()
     latest = df.iloc[-1]
 
-    # --- ENCABEZADO CON LOGO ---
-    col_l, col_r = st.columns([1, 4])
-    with col_l:
-        # Usando el nombre del archivo de logo proporcionado
-        st.image("image_4b7f32.png", width=120)
-    with col_r:
-        st.title("MERU NOC: Inteligencia de Red Satelital")
-        st.caption(f"Sistema Activo | Latencia de IA: 1.2s | {datetime.now().strftime('%H:%M:%S UTC')}")
+    # --- ENCABEZADO ---
+    col_header_1, col_header_2 = st.columns([1, 4])
+    
+    with col_header_1:
+        # LOGO MERU (Usamos un placeholder visual robusto para evitar errores de archivo)
+        st.markdown("""
+            <div style="background-color:#388bfd; color:white; padding:15px; border-radius:10px; text-align:center; font-weight:bold; font-size:24px; letter-spacing:2px;">
+                MERU
+            </div>
+            """, unsafe_allow_html=True)
+            
+    with col_header_2:
+        st.title("Network Operations Center (NOC) | AI Intelligence")
+        st.markdown(f"**Estado del Sistema:** <span class='status-badge' style='background:#238636;'>OPERATIVO</span> | UTC: {datetime.now().strftime('%H:%M:%S')}", unsafe_allow_html=True)
 
-    # --- MÉTRICAS PRINCIPALES ---
+    st.write("---")
+
+    # --- KPI METRICS ---
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Eb/No Actual", f"{latest['EbNo']:.2f} dB", f"{latest['EbNo']-10:.1f}", delta_color="normal")
-    m2.metric("Latencia Media", f"{int(latest['Latency'])} ms", "-5ms", delta_color="inverse")
-    m3.metric("Packet Loss", f"{latest['PacketLoss']:.2f}%", "0.2%", delta_color="inverse")
-    m4.metric("Throughput", f"{int(latest['Traffic'])} Mbps", "12 Mbps")
-
-    st.divider()
+    m1.metric("Eb/No (Signal)", f"{latest['EbNo']:.2f} dB", f"{latest['EbNo']-11:.1f}", delta_color="normal")
+    m2.metric("Latencia Media", f"{int(latest['Latency'])} ms", "-12ms", delta_color="inverse")
+    m3.metric("Packet Loss", f"{latest['PacketLoss']:.2f}%", "0.05%", delta_color="inverse")
+    m4.metric("Throughput", f"{int(latest['Throughput'])} Mbps", "5 Mbps")
 
     # --- CUERPO PRINCIPAL ---
     col_main, col_ai = st.columns([2, 1])
 
     with col_main:
-        st.subheader("📊 Análisis de Telemetría Real-Time")
+        st.subheader("📊 Análisis de Enlace Satelital")
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['Timestamp'], y=df['EbNo'], name="Eb/No", line=dict(color='#388bfd', width=3)))
-        fig.add_trace(go.Scatter(x=df['Timestamp'], y=df['Latency']/50, name="Latencia (Escalada)", line=dict(color='#f85149', dash='dot')))
-        fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,t=20,b=0))
+        fig.add_trace(go.Scatter(x=df['Timestamp'], y=df['EbNo'], name="Calidad Eb/No", line=dict(color='#388bfd', width=3)))
+        fig.add_trace(go.Scatter(x=df['Timestamp'], y=df['Throughput']/10, name="Carga (Escalada)", line=dict(color='#f1e05a', dash='dot')))
+        fig.update_layout(
+            template="plotly_dark", 
+            height=400, 
+            margin=dict(l=0,r=0,t=20,b=0),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
         st.plotly_chart(fig, use_container_width=True)
 
-        # Gráfico de calor de nodos
-        st.subheader("🌐 Estado de Nodos Periféricos")
-        nodes = np.random.choice([0, 1, 2], size=(4, 8), p=[0.85, 0.1, 0.05])
-        fig_heat = px.imshow(nodes, 
-                            labels=dict(color="Estado"),
-                            color_continuous_scale=['#238636', '#d29922', '#da3633'])
-        fig_heat.update_layout(height=200, margin=dict(l=0,r=0,t=0,b=0))
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.subheader("🌐 Topología de Nodos Globales")
+        # Simulación de estados de nodos
+        node_status = np.random.choice(["Online", "Warning", "Critical"], size=10, p=[0.8, 0.15, 0.05])
+        node_cols = st.columns(5)
+        for i, status in enumerate(node_status):
+            color = "#238636" if status == "Online" else "#d29922" if status == "Warning" else "#da3633"
+            node_cols[i % 5].markdown(f"<div style='border-left: 4px solid {color}; padding:5px; background:#161b22; margin:2px;'>Node-{i+100}<br><small>{status}</small></div>", unsafe_allow_html=True)
 
     with col_ai:
         st.markdown('<div class="ai-box">', unsafe_allow_html=True)
-        st.subheader("🧠 Diagnóstico de IA Meru")
+        st.subheader("🧠 Diagnóstico Gemini AI")
         
-        # Resumen para la IA
-        summary = {
-            "EbNo": round(latest['EbNo'], 2),
-            "Loss": round(latest['PacketLoss'], 2),
-            "Latency": int(latest['Latency']),
-            "Trend": "Degradación detectada" if latest['EbNo'] < 9 else "Estable"
+        # Preparar resumen técnico para la IA
+        summary_data = {
+            "signal_quality": f"{latest['EbNo']:.2f} dB",
+            "latency": f"{latest['Latency']:.0f}ms",
+            "packet_loss": f"{latest['PacketLoss']:.2f}%",
+            "traffic_load": f"{latest['Throughput']:.0f}%"
         }
         
-        if st.button("🤖 Generar Informe de IA"):
-            with st.spinner("Consultando al cerebro de red..."):
-                analysis = call_gemini_analysis(json.dumps(summary))
-                st.write(analysis)
-        else:
-            st.info("Haz clic para que la IA analice el estado actual de los enlaces.")
+        st.write("El motor Gemini 2.5 Flash está listo para procesar la telemetría actual.")
+        
+        if st.button("🤖 Generar Análisis Inteligente", use_container_width=True):
+            with st.spinner("Analizando patrones de red..."):
+                analysis = call_gemini_analysis(json.dumps(summary_data))
+                st.markdown(f"**Resultado del Análisis:**\n\n{analysis}")
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-        st.subheader("🚨 Registro de Eventos")
-        for _ in range(3):
-            st.warning(f"Aviso: Fluctuación en Nodo {np.random.randint(1,100)} detectada.")
-
-    # --- TABLA CRUDA ---
-    with st.expander("Ver Telemetría Completa"):
-        st.table(df.tail(10))
+        st.subheader("🔔 Alertas Recientes")
+        st.error("Alerta: Degradación de EbNo detectada en Sector 4 (Simulado)")
+        st.info("Info: Backup de configuración completado a las 01:00 UTC")
 
 if __name__ == "__main__":
     main()
