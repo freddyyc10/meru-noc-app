@@ -9,3 +9,4 @@ openpyxl
 docxtpl
 python-docx
 google-generativeai
+plotly
