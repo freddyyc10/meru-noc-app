@@ -6,115 +6,154 @@ import requests
 import json
 import time
 
-# --- CONFIGURACIÓN DE API IA ---
-# Clave proporcionada por el usuario
-apiKey = "AIzaSyBQy0psFsocJJNn5rEsiYRCi-dqOH_qDmg" 
-# Usando el modelo estable 1.5-flash para evitar el error 404
-MODEL_NAME = "gemini-1.5-flash"
+# --- CONFIGURACIÓN DE ACCESO Y MODELO ---
+# Usando la API Key de las capturas proporcionadas
+API_KEY = "AlzaSyBQy0psFsocJJN5rEsiYRCi-dqOH_qDmg"
+MODEL_NAME = "gemini-2.5-flash-preview-09-2025"
 
-def call_gemini_analysis(data_content):
-    """Llamada a Gemini 1.5 Flash para análisis técnico de NOC"""
+def get_ai_analysis(summary_text, detail_samples):
+    """
+    Función de análisis profundo de red. 
+    Implementa retries con backoff exponencial para evitar errores de cuota.
+    """
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
     
-    if not apiKey:
-        return "❌ Error: API Key no configurada."
+    prompt = f"""
+    Eres el experto senior en NOC de Meru Networks. Analiza la siguiente telemetría:
+    
+    RESUMEN ESTADÍSTICO:
+    {summary_text}
+    
+    MUESTRA DE DATOS (ANOMALÍAS DETECTADAS):
+    {detail_samples}
+    
+    TAREAS:
+    1. Identifica picos de tráfico o caídas de señal.
+    2. Diagnostica posibles causas (congestión, interferencia, fallo de hardware).
+    3. Sugiere 3 acciones técnicas inmediatas.
+    
+    Responde en español con un tono profesional y técnico.
+    """
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={apiKey}"
-    
-    system_prompt = (
-        "Eres el sistema experto de Meru Intelligence Center. Tu especialidad es la telemetría satelital y de redes. "
-        "Analiza los siguientes datos de un archivo CSV de monitoreo (NOC). Busca saturación de ancho de banda, "
-        "caídas de Eb/No, fluctuaciones de latencia o pérdida de paquetes. "
-        "Responde con un informe técnico estructurado en: 1. Resumen de Salud, 2. Anomalías Detectadas, 3. Recomendaciones."
-    )
-    
     payload = {
         "contents": [{
-            "parts": [{"text": f"SISTEMA: {system_prompt}\n\nDATOS A ANALIZAR:\n{data_content}"}]
+            "parts": [{"text": prompt}]
         }]
     }
-    
-    headers = {'Content-Type': 'application/json'}
-    
-    # Reintentos con backoff exponencial
-    for i in range(3):
+
+    # Reintentos automáticos
+    for wait_time in [1, 2, 4, 8]:
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response = requests.post(url, json=payload, timeout=30)
             if response.status_code == 200:
-                result = response.json()
-                return result['candidates'][0]['content']['parts'][0]['text']
+                data = response.json()
+                return data['candidates'][0]['content']['parts'][0]['text']
             elif response.status_code == 404:
-                return f"⚠️ Error 404: El modelo '{MODEL_NAME}' no fue encontrado. Verifica la disponibilidad en tu región o cuenta de Google AI Studio."
+                return "❌ Error 404: El modelo especificado no está disponible. Contacta al administrador."
             elif response.status_code == 429:
-                time.sleep(2**i)
+                time.sleep(wait_time)
                 continue
             else:
-                return f"⚠️ Error de API ({response.status_code}): {response.text}"
+                return f"⚠️ Error del Servidor: {response.status_code}\n{response.text}"
         except Exception as e:
-            return f"⚠️ Excepción de conexión: {str(e)}"
+            return f"❌ Error de conexión: {str(e)}"
     
-    return "Error: Máximo de reintentos alcanzado."
+    return "No se pudo obtener respuesta de la IA después de varios intentos."
 
-# --- INTERFAZ STREAMLIT ---
-st.set_page_config(page_title="Meru NOC - AI Master", page_icon="🛰️", layout="wide")
+# --- CONFIGURACIÓN DE LA INTERFAZ ---
+st.set_page_config(page_title="Meru NOC - Dashboard", page_icon="🛰️", layout="wide")
 
+# Estilo visual Meru Networks
 st.markdown("""
     <style>
-    .report-container { 
-        background-color: #1c2128; 
-        border-left: 5px solid #238636; 
-        padding: 25px; 
+    .stApp { background-color: #0e1117; color: #ffffff; }
+    .report-container {
+        background-color: #161b22;
+        padding: 20px;
         border-radius: 10px;
-        color: #e6edf3;
-        font-family: sans-serif;
+        border: 1px solid #30363d;
+        font-family: 'monospace';
     }
+    .stMetric { background-color: #161b22; padding: 15px; border-radius: 8px; border: 1px solid #30363d; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🛰️ Meru Intelligence Center")
-st.subheader("Monitoreo Proactivo de Red con IA")
+# Encabezado
+col_logo, col_title = st.columns([1, 4])
+with col_title:
+    st.title("🛰️ Meru Intelligence Center")
+    st.write("Monitoreo Avanzado y Diagnóstico por IA")
 
 # Sidebar
-st.sidebar.header("📁 Importar Datos")
-uploaded_file = st.sidebar.file_uploader("Cargar statistics (44).csv", type=["csv"])
+st.sidebar.header("Configuración de Datos")
+uploaded_file = st.sidebar.file_uploader("Cargar estadísticas (.csv)", type=["csv"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    st.sidebar.success("Archivo cargado correctamente")
     
-    tab_viz, tab_ai = st.tabs(["📊 Visualización", "🧠 Análisis Predictivo"])
-    
+    # --- MÉTRICAS DE NIVEL SUPERIOR ---
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.metric("Total Registros", len(df))
+    with m2:
+        # Intentar detectar columnas de latencia
+        lat_col = [c for c in df.columns if 'lat' in c.lower() or 'ms' in c.lower()]
+        if lat_col:
+            st.metric("Latencia Promedio", f"{df[lat_col[0]].mean():.2f} ms")
+        else:
+            st.metric("Columnas", len(df.columns))
+    with m3:
+        st.metric("Estado de IA", "Conectado", delta="Gemini 2.5")
+    with m4:
+        st.metric("Servicio", "NOC Meru")
+
+    # --- PESTAÑAS DE FUNCIONALIDAD ---
+    tab_viz, tab_anom, tab_ai = st.tabs(["📊 Visualización", "🔍 Detección de Anomalías", "🧠 Informe de IA"])
+
     with tab_viz:
-        st.write("### Vista Previa de Telemetría")
-        st.dataframe(df.head(10), use_container_width=True)
-        
+        st.subheader("Análisis de Tendencias")
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         if num_cols:
-            col_chart1, col_chart2 = st.columns(2)
-            with col_chart1:
-                feat = st.selectbox("Métrica Primaria", num_cols, index=0)
-                fig1 = px.line(df, y=feat, title=f"Tendencia de {feat}", template="plotly_dark")
-                st.plotly_chart(fig1, use_container_width=True)
-            with col_chart2:
-                feat2 = st.selectbox("Métrica Secundaria", num_cols, index=min(1, len(num_cols)-1))
-                fig2 = px.histogram(df, x=feat2, title=f"Distribución de {feat2}", template="plotly_dark")
-                st.plotly_chart(fig2, use_container_width=True)
+            col_sel, col_graph = st.columns([1, 3])
+            with col_sel:
+                y_axis = st.selectbox("Métrica a visualizar", num_cols)
+                chart_type = st.radio("Tipo de gráfico", ["Área", "Línea", "Barras"])
+            
+            with col_graph:
+                if chart_type == "Área":
+                    st.plotly_chart(px.area(df, y=y_axis, template="plotly_dark"), use_container_width=True)
+                elif chart_type == "Línea":
+                    st.plotly_chart(px.line(df, y=y_axis, template="plotly_dark"), use_container_width=True)
+                else:
+                    st.plotly_chart(px.bar(df, y=y_axis, template="plotly_dark"), use_container_width=True)
+
+    with tab_anom:
+        st.subheader("Puntos Críticos Detectados")
+        if num_cols:
+            # Detectar valores por encima del percentil 95
+            threshold = st.slider("Umbral de Anomalía (Percentil)", 90, 99, 95)
+            val_threshold = np.percentile(df[num_cols[0]], threshold)
+            anomalies = df[df[num_cols[0]] > val_threshold]
+            
+            st.write(f"Registros que superan el umbral de {val_threshold:.2f}:")
+            st.dataframe(anomalies, use_container_width=True)
 
     with tab_ai:
-        st.write("### Informe de Inteligencia Artificial")
-        
-        if st.button("🚀 Ejecutar Diagnóstico con Gemini"):
-            with st.spinner("Analizando patrones de red..."):
-                # Preparar datos: Estadísticas + Muestra representativa
-                stats = df.describe().to_string()
-                # Tomamos las 20 filas con valores más altos en la primera columna numérica (posibles picos)
-                # y las primeras/últimas filas.
-                sample_data = df.head(15).to_string()
+        st.subheader("Generador de Reporte Predictivo")
+        if st.button("🪄 Analizar con IA"):
+            with st.spinner("Procesando telemetría con Gemini..."):
+                summary = df.describe().to_string()
+                # Tomamos los 15 registros más altos para que la IA los vea
+                samples = df.sort_values(by=num_cols[0], ascending=False).head(15).to_string()
                 
-                context = f"ESTADÍSTICAS DESCRIPTIVAS:\n{stats}\n\nMUESTRA DE DATOS:\n{sample_data}"
+                report = get_ai_analysis(summary, samples)
                 
-                report = call_gemini_analysis(context)
+                st.markdown('<div class="report-container">', unsafe_allow_html=True)
+                st.markdown(report)
+                st.markdown('</div>', unsafe_allow_html=True)
                 
-                st.markdown(f'<div class="report-container">{report}</div>', unsafe_allow_html=True)
-                st.download_button("Descargar Reporte", report, file_name="diagnostico_noc.md")
+                st.download_button("Descargar Reporte", report, "meru_ai_report.txt")
+
 else:
-    st.info("Por favor, carga el archivo CSV en la barra lateral para comenzar el análisis.")
+    st.info("Carga un archivo CSV para activar el panel de control.")
+    st.image("https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&q=80&w=1000", caption="Conectividad Global Meru")
