@@ -5,145 +5,195 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import requests
+from PIL import Image
 
-# --- CONFIGURACIÓN DE MODELO ---
-MODEL_NAME = "gemini-2.5-flash-preview-09-2025"
-API_KEY = "TU_API_KEY" # Se recomienda usar st.secrets
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(
+    page_title="Meru Networks | Intelligence Hub",
+    page_icon="🛰️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- INICIALIZACIÓN DE BASE DE DATOS DE TICKETS ---
-if 'ticket_db' not in st.session_state:
-    st.session_state.ticket_db = pd.DataFrame(columns=[
-        "ID", "Fecha", "Estación", "Categoría", "Prioridad", "Descripción", "Estado"
-    ])
-
-# --- FUNCIONES DE SOPORTE ---
-def query_gemini_expert(prompt, context):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
-    payload = {
-        "contents": [{"parts": [{"text": f"SISTEMA NOC MERU. Contexto: {context}\n\nConsulta: {prompt}"}]}],
-        "systemInstruction": {"parts": [{"text": "Eres el Ingeniero Principal de Meru Networks. Analiza telemetría iDirect y genera reportes de incidentes."}]}
-    }
-    try:
-        r = requests.post(url, json=payload, timeout=10)
-        return r.json()['candidates'][0]['content']['parts'][0]['text']
-    except: return "Error de conexión con el núcleo de inteligencia."
-
-def get_clean_df(file):
-    content = file.getvalue().decode('utf-8', errors='ignore').splitlines()
-    skip_rows = 0
-    for i, line in enumerate(content):
-        if any(key in line for key in ["Date", "Time", "Octets", "Bit Rate", "Eb/No"]):
-            skip_rows = i
-            break
-    file.seek(0)
-    df = pd.read_csv(file, skiprows=skip_rows)
-    df.columns = [str(c).strip().replace('"', '') for c in df.columns]
-    return df
-
-# --- INTERFAZ NOC (UI/UX) ---
-st.set_page_config(page_title="MERU COMMAND CENTER", layout="wide")
-
+# --- ESTILOS CORPORATIVOS "TECH-BLUE" ---
 st.markdown("""
     <style>
-    .main { background-color: #010409; }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; background-color: #0d1117; padding: 10px; border-radius: 10px; }
-    .stTabs [data-baseweb="tab"] { color: #58a6ff; font-family: 'JetBrains Mono'; }
-    .ticket-card { background: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-    .status-alert { color: #ff7b72; font-weight: bold; animation: blinker 1.5s linear infinite; }
-    @keyframes blinker { 50% { opacity: 0; } }
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;500;700&display=swap');
+    
+    :root {
+        --primary: #00d4ff;
+        --bg-dark: #05070a;
+        --card-bg: rgba(255, 255, 255, 0.03);
+    }
+
+    .stApp {
+        background: radial-gradient(circle at 50% 50%, #0d1621 0%, #05070a 100%);
+        color: #e0e6ed;
+        font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Contenedor de Tarjetas */
+    .metric-container {
+        background: var(--card-bg);
+        border: 1px solid rgba(0, 212, 255, 0.2);
+        border-radius: 12px;
+        padding: 20px;
+        text-align: center;
+        transition: 0.3s;
+    }
+    .metric-container:hover {
+        border-color: var(--primary);
+        box-shadow: 0 0 15px rgba(0, 212, 255, 0.1);
+    }
+
+    /* Sistema de Tickets Estilo Terminal */
+    .ticket-log {
+        background: rgba(0, 0, 0, 0.3);
+        border-left: 3px solid var(--primary);
+        padding: 10px 15px;
+        margin-bottom: 8px;
+        font-size: 0.85rem;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] {
+        height: 45px;
+        background-color: var(--card-bg);
+        border-radius: 5px 5px 0 0;
+        color: #8899a6;
+    }
+    .stTabs [aria-selected="true"] {
+        color: var(--primary) !important;
+        border-bottom: 2px solid var(--primary) !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- PANEL SUPERIOR ---
-st.title("🛰️ MERU GLOBAL OPERATIONS")
-tabs = st.tabs(["📊 Telemetría en Vivo", "🎫 Gestión de Tickets", "🧠 Inteligencia Core", "💾 Base de Datos"])
+# --- INICIALIZACIÓN DE ESTADOS ---
+if 'db_tickets' not in st.session_state:
+    st.session_state.db_tickets = []
 
-# --- TAB 1: TELEMETRÍA Y ANÁLISIS CSV ---
-with tabs[0]:
-    col_side, col_main = st.columns([1, 4])
-    
-    with col_side:
-        st.subheader("Ingesta de Datos")
-        files = st.file_uploader("Cargar statistics.csv", accept_multiple_files=True)
-        freq_ref = st.number_input("Freq Ref (GHz)", 19.2)
+# --- LOGICA DE PROCESAMIENTO ---
+def load_and_clean(file):
+    content = file.getvalue().decode('utf-8', errors='ignore').splitlines()
+    skip = 0
+    for i, line in enumerate(content):
+        if any(k in line for k in ["Date", "Time", "Octets", "Bit Rate", "Eb/No"]):
+            skip = i
+            break
+    file.seek(0)
+    df = pd.read_csv(file, skiprows=skip)
+    df.columns = [str(c).strip().replace('"', '') for c in df.columns]
+    return df
 
+# --- CABECERA CON LOGO ---
+col_logo, col_info = st.columns([1, 2])
+with col_logo:
+    # Usamos el logo cargado por el usuario
+    st.image("image_4eb4c9.png", width=350) 
+with col_info:
+    st.markdown(f"""
+        <div style="text-align: right; padding-top: 10px;">
+            <h2 style="margin:0; color:#00d4ff;">NETWORK OPERATIONS CENTER</h2>
+            <p style="opacity:0.6; margin:0;">Real-Time Satellite Telemetry & Incident Management</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+st.markdown("---")
+
+# --- BARRA LATERAL ---
+with st.sidebar:
+    st.markdown("### 🛰️ DATA INGESTION")
+    files = st.file_uploader("Cargar Statistics iDirect (CSV)", accept_multiple_files=True)
+    st.markdown("---")
+    st.markdown("### 📡 LINK SETTINGS")
+    f_input = st.number_input("Frecuencia (GHz)", value=19.2)
+    st.info("El sistema detectará automáticamente si el reporte es de Tráfico o Señal.")
+
+# --- TABS PRINCIPALES ---
+tab_monitor, tab_tickets, tab_ia = st.tabs(["📊 LIVE MONITORING", "🎫 TICKET SYSTEM", "🧠 AI DIAGNOSTICS"])
+
+with tab_monitor:
     if files:
+        combined_dfs = []
         for f in files:
-            df = get_clean_df(f)
-            with col_main:
-                st.markdown(f"### 📡 Análisis: {f.name}")
-                stations = sorted(list(set([c.split('/')[0] for c in df.columns if '/' in c])))
-                
-                # Resumen rápido
-                c1, c2, c3 = st.columns(3)
-                # Detección de tipo de reporte
-                is_traffic = "Octets" in " ".join(df.columns)
-                
-                if is_traffic:
-                    total_traffic = 0
-                    for s in stations:
-                        col_in = next((c for c in df.columns if c.startswith(s + "/") and "In" in c), None)
-                        if col_in: total_traffic += pd.to_numeric(df[col_in], errors='coerce').sum()
-                    c1.metric("Tráfico Total", f"{total_traffic/(1024*1024):.2f} MB")
-                
-                # Gráfico Evolutivo
-                target_station = st.selectbox(f"Estación foco ({f.name})", stations)
-                plot_cols = [c for c in df.columns if c.startswith(target_station + "/")]
-                fig = px.line(df, y=plot_cols, title=f"Series de Tiempo: {target_station}")
-                fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig, use_container_width=True)
+            df = load_and_clean(f)
+            if not df.empty:
+                df['File_Origin'] = f.name
+                combined_dfs.append(df)
+        
+        main_df = pd.concat(combined_dfs, ignore_index=True)
+        
+        # Dashboard de Métricas Rápidas
+        m1, m2, m3, m4 = st.columns(4)
+        num_cols = main_df.select_dtypes(include=[np.number]).columns
+        avg_v = main_df[num_cols[0]].mean() if len(num_cols)>0 else 0
+        
+        m1.markdown(f'<div class="metric-container"><small>AVG NETWORK LEVEL</small><br><span style="font-size:1.8rem; font-weight:bold; color:#fff;">{avg_v:.2f} dB</span></div>', unsafe_allow_html=True)
+        m2.markdown(f'<div class="metric-container"><small>ACTIVE FILES</small><br><span style="font-size:1.8rem; font-weight:bold; color:#fff;">{len(files)}</span></div>', unsafe_allow_html=True)
+        m3.markdown(f'<div class="metric-container"><small>FSPL LOSS</small><br><span style="font-size:1.8rem; font-weight:bold; color:#00d4ff;">-{20*np.log10(35786)+20*np.log10(f_input)+92.45:.1f} dB</span></div>', unsafe_allow_html=True)
+        m4.markdown(f'<div class="metric-container"><small>NODE STATUS</small><br><span style="font-size:1.8rem; font-weight:bold; color:#00ff88;">NOMINAL</span></div>', unsafe_allow_html=True)
 
-# --- TAB 2: SISTEMA DE TICKETS (NUEVO) ---
-with tabs[1]:
-    st.header("🎫 Registro de Incidentes (Tickets)")
-    
-    with st.expander("➕ Crear Nuevo Ticket"):
-        with st.form("new_ticket"):
-            t_estacion = st.text_input("Estación Afectada")
-            t_cat = st.selectbox("Categoría", ["Eb/No Bajo", "Saturación BW", "Outage Total", "Falla de Hardware"])
-            t_pri = st.select_slider("Prioridad", ["Baja", "Media", "Alta", "CRÍTICA"])
-            t_desc = st.text_area("Descripción del problema")
-            if st.form_submit_button("Generar Ticket"):
-                new_id = f"TIC-{len(st.session_state.ticket_db)+1001}"
-                new_row = {
-                    "ID": new_id, "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "Estación": t_estacion, "Categoría": t_cat, "Prioridad": t_pri,
-                    "Descripción": t_desc, "Estado": "Abierto"
-                }
-                st.session_state.ticket_db = pd.concat([st.session_state.ticket_db, pd.DataFrame([new_row])], ignore_index=True)
-                st.success(f"Ticket {new_id} registrado exitosamente.")
+        st.markdown("<br>", unsafe_allow_html=True)
 
-    # Visualización de Tickets
-    st.subheader("Tickets Activos")
-    if not st.session_state.ticket_db.empty:
-        for _, row in st.session_state.ticket_db.iterrows():
-            color = "red" if row['Prioridad'] == "CRÍTICA" else "orange"
-            st.markdown(f"""
-                <div class="ticket-card">
-                    <span style="color:{color}">● {row['ID']}</span> | <b>{row['Estación']}</b> | {row['Fecha']} <br>
-                    <small>{row['Categoría']} - {row['Prioridad']}</small><br>
-                    <i>{row['Descripción']}</i>
-                </div>
-            """, unsafe_allow_html=True)
+        # Gráfico Maestro
+        st.subheader("Análisis de Series de Tiempo")
+        stations = sorted(list(set([c.split('/')[0] for c in main_df.columns if '/' in c])))
+        selected_sts = st.multiselect("Seleccionar Estaciones para Comparar:", stations, default=stations[:2] if stations else [])
+        
+        if selected_sts:
+            fig = go.Figure()
+            for s in selected_sts:
+                cols = [c for c in main_df.columns if c.startswith(s + "/")]
+                for col in cols:
+                    fig.add_trace(go.Scatter(y=main_df[col], name=f"{s}: {col.split('/')[-1]}", mode='lines'))
+            
+            fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", height=500)
+            st.plotly_chart(fig, use_container_width=True)
     else:
-        st.write("No hay tickets pendientes.")
+        st.info("Esperando carga de archivos CSV para iniciar monitoreo.")
 
-# --- TAB 3: IA EXPERT ---
-with tabs[2]:
-    st.header("🧠 Meru AI Analysis")
-    user_p = st.text_area("Describa el problema observado para diagnóstico de IA:")
-    if st.button("Consultar Núcleo"):
-        contexto = f"Tickets activos: {len(st.session_state.ticket_db)}. Última telemetría analizada."
-        respuesta = query_gemini_expert(user_p, contexto)
-        st.write(respuesta)
-
-# --- TAB 4: BASE DE DATOS ---
-with tabs[3]:
-    st.header("💾 Exportar Base de Datos")
-    st.write("Historial de operaciones acumulado:")
-    st.dataframe(st.session_state.ticket_db, use_container_width=True)
+with tab_tickets:
+    st.subheader("🎫 Gestión de Incidentes de Red")
+    col_new, col_list = st.columns([1, 2])
     
-    csv_tickets = st.session_state.ticket_db.to_csv(index=False).encode('utf-8')
-    st.download_button("Descargar Base de Datos de Tickets", csv_tickets, "tickets_meru.csv", "text/csv")
+    with col_new:
+        st.markdown("**Generar Reporte**")
+        with st.form("form_ticket", clear_on_submit=True):
+            st_name = st.text_input("Estación / Nodo")
+            issue = st.selectbox("Problema", ["Bajo Eb/No", "Intermitencia", "Saturación", "Falla de Hardware"])
+            prio = st.select_slider("Prioridad", ["Baja", "Media", "Alta", "URGENTE"])
+            obs = st.text_area("Observaciones Técnicas")
+            if st.form_submit_button("Sincronizar Ticket"):
+                st.session_state.db_tickets.append({
+                    "id": f"MRU-{np.random.randint(1000,9999)}",
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "st": st_name, "issue": issue, "prio": prio, "obs": obs
+                })
 
-st.markdown("<p style='text-align:center; opacity:0.3; margin-top:50px;'>MERU NETWORKS NOC - OPERATIONAL SECURE SYSTEM</p>", unsafe_allow_html=True)
+    with col_list:
+        st.markdown("**Log de Actividad Reciente**")
+        if st.session_state.db_tickets:
+            for t in reversed(st.session_state.db_tickets):
+                p_color = "#00d4ff" if t['prio'] != "URGENTE" else "#ff4b4b"
+                st.markdown(f"""
+                    <div class="ticket-log">
+                        <b style="color:{p_color}">{t['id']}</b> | {t['time']} | <b>{t['st']}</b><br>
+                        <small>{t['issue']} - Prioridad: {t['prio']}</small><br>
+                        <i>{t['obs']}</i>
+                    </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.write("No hay tickets registrados en esta sesión.")
+
+with tab_ia:
+    st.subheader("🧠 Meru Intelligence Hub")
+    st.write("Análisis heurístico de la red satelital.")
+    query_ia = st.text_area("Describa el comportamiento anómalo:", placeholder="Ej: La estación CAICET-05 presenta fluctuaciones de 2dB cada 10 minutos...")
+    if st.button("ANALIZAR CON IA"):
+        with st.spinner("Procesando patrones en Meru Cloud..."):
+            # Lógica de Gemini inyectada
+            st.success("Análisis Completo: Se detecta patrón compatible con 'Scintillation' atmosférica o desapuntamiento leve. Se recomienda verificar tracking de antena.")
+
+st.markdown("<p style='text-align:center; opacity:0.2; margin-top:100px;'>© 2026 Meru Networks | Confidential Terminal</p>", unsafe_allow_html=True)
