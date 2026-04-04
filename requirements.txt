@@ -1,8 +1,3 @@
-streamlit
-pandas
-plotly
-sqlite3
-json
-os
-from datetime import datetime
-streamlit.components.v1 as components
+streamlit>=1.30.0
+pandas>=2.0.0
+numpy>=1.24.0
