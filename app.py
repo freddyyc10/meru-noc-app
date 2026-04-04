@@ -9,7 +9,8 @@ import time
 import io
 
 # --- CONFIGURACIÓN DE IDENTIDAD Y API ---
-API_KEY = ""  # El sistema inyecta la clave automáticamente
+# El sistema inyecta la clave automáticamente en el entorno de ejecución
+API_KEY = "" 
 MODEL_NAME = "gemini-2.5-flash-preview-09-2025"
 
 # Colores Corporativos Meru
@@ -17,10 +18,10 @@ MERU_BLUE = "#3f4494"
 MERU_CYAN = "#00aeef"
 MERU_DARK = "#0b0f19"
 
-# --- FUNCIONES DE SOPORTE ---
+# --- FUNCIONES DE SOPORTE PARA IA ---
 
-def call_gemini(prompt, system_prompt="Eres un experto en redes satelitales de Meru Networks."):
-    """Llamada directa a Gemini con reintentos."""
+def call_gemini_api(prompt, system_prompt="Eres un experto en NOC y redes satelitales de Meru Networks."):
+    """Llamada optimizada a Gemini con manejo de errores 403/429."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
     
     payload = {
@@ -32,26 +33,30 @@ def call_gemini(prompt, system_prompt="Eres un experto en redes satelitales de M
         }
     }
     
-    for delay in [1, 2, 4]:
+    # Reintentos con backoff exponencial
+    for delay in [1, 2, 4, 8]:
         try:
             response = requests.post(url, json=payload, timeout=30)
             if response.status_code == 200:
                 result = response.json()
                 return result['candidates'][0]['content']['parts'][0]['text']
+            elif response.status_code == 403:
+                return "⚠️ Error 403: Acceso denegado. Verificando permisos del modelo..."
             elif response.status_code == 429:
                 time.sleep(delay)
             else:
-                return f"⚠️ Error del servidor (Código: {response.status_code})"
+                return f"⚠️ Error del sistema (Código: {response.status_code})"
         except Exception as e:
-            return f"❌ Error de conexión: {str(e)}"
-    return "No se pudo conectar con Gemini tras varios intentos."
+            return f"❌ Error de red: {str(e)}"
+    
+    return "No se pudo obtener respuesta de la IA tras varios intentos."
 
-def get_visual_analysis(df, metric):
-    """Genera una imagen y la analiza con la visión de Gemini."""
+def analyze_visual_patterns(df, metric_name):
+    """Genera una imagen de la métrica y la envía para análisis visual."""
     plt.style.use('dark_background')
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(df.index, df[metric], color=MERU_CYAN, linewidth=1.5)
-    ax.set_title(f"Análisis de Patrones: {metric}", color="white")
+    ax.plot(df.index, df[metric_name], color=MERU_CYAN, linewidth=1.5)
+    ax.set_title(f"Patrón de Telemetría: {metric_name}", color="white")
     ax.grid(True, alpha=0.1)
     
     buf = io.BytesIO()
@@ -59,7 +64,7 @@ def get_visual_analysis(df, metric):
     plt.close(fig)
     img_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
 
-    prompt = f"Analiza esta gráfica de la métrica {metric}. Busca anomalías, picos de congestión o degradación de señal satelital. Responde en español técnico."
+    prompt = f"Analiza esta gráfica de {metric_name}. ¿Ves desvanecimiento por lluvia (rain fade), interferencia o saturación? Responde breve y técnico."
     
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
     payload = {
@@ -73,125 +78,130 @@ def get_visual_analysis(df, metric):
     
     try:
         res = requests.post(url, json=payload, timeout=30)
-        return res.json()['candidates'][0]['content']['parts'][0]['text']
+        if res.status_code == 200:
+            return res.json()['candidates'][0]['content']['parts'][0]['text']
+        else:
+            return f"Error visual ({res.status_code})"
     except:
-        return "El motor visual no pudo procesar la imagen."
+        return "Error al procesar la imagen con el cerebro de IA."
 
-# --- INTERFAZ DE USUARIO ---
+# --- INTERFAZ DE USUARIO (UI) ---
 
 st.set_page_config(page_title="Meru Networks | Intel Hub", layout="wide", page_icon="📡")
 
-# Estilo y Logo
+# Estilos CSS
 st.markdown(f"""
     <style>
     .stApp {{ background-color: {MERU_DARK}; color: white; }}
-    .header-box {{ 
+    .header-container {{ 
         display: flex; align-items: center; gap: 20px; 
-        padding: 20px; background: rgba(255,255,255,0.05); 
+        padding: 20px; background: rgba(255,255,255,0.03); 
         border-radius: 15px; border-left: 5px solid {MERU_CYAN};
-        margin-bottom: 25px;
+        margin-bottom: 30px;
     }}
-    .metric-card {{
+    .metric-box {{
         background: #161b22; border: 1px solid #30363d;
-        padding: 20px; border-radius: 12px; text-align: center;
+        padding: 25px; border-radius: 15px; text-align: center;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
     }}
+    .metric-label {{ color: {MERU_CYAN}; font-size: 12px; font-weight: bold; text-transform: uppercase; }}
+    .metric-value {{ font-size: 32px; font-weight: bold; margin: 10px 0; }}
     </style>
 """, unsafe_allow_html=True)
 
-# Logo SVG de Meru
-logo_svg = f"""
-<div class="header-box">
-    <svg width="80" height="50" viewBox="0 0 100 60" fill="none">
-        <path d="M10 50L40 10L55 35L70 15L90 50" stroke="{MERU_BLUE}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M25 50L45 25" stroke="{MERU_CYAN}" stroke-width="4" stroke-linecap="round"/>
-        <path d="M60 50L75 35" stroke="{MERU_CYAN}" stroke-width="4" stroke-linecap="round"/>
+# Logo de Meru en SVG para que no se pierda nunca
+logo_html = f"""
+<div class="header-container">
+    <svg width="80" height="60" viewBox="0 0 100 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M15 50L45 10L60 35L75 15L95 50" stroke="{MERU_BLUE}" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M30 50L50 25" stroke="{MERU_CYAN}" stroke-width="5" stroke-linecap="round"/>
+        <path d="M65 50L80 35" stroke="{MERU_CYAN}" stroke-width="5" stroke-linecap="round"/>
     </svg>
     <div>
-        <h1 style="margin:0; font-size: 24px; letter-spacing:-1px;">
-            <span style="color:{MERU_CYAN}">MERU</span> <span style="color:white">NETWORKS</span>
-        </h1>
-        <p style="margin:0; font-size:10px; color:{MERU_CYAN}; letter-spacing: 3px; font-weight:bold;">SATELLITE INTELLIGENCE HUB</p>
+        <h1 style="margin:0; font-size: 28px; color: white; line-height: 1;">MERU <span style="color:{MERU_CYAN}">NETWORKS</span></h1>
+        <p style="margin:5px 0 0 0; font-size: 11px; color: {MERU_CYAN}; letter-spacing: 4px; font-weight: 800;">SATELLITE INTELLIGENCE HUB</p>
     </div>
 </div>
 """
-st.markdown(logo_svg, unsafe_allow_html=True)
+st.markdown(logo_html, unsafe_allow_html=True)
 
-# Sidebar para carga de archivos
+# Sidebar
 with st.sidebar:
-    st.header("⚙️ Configuración")
-    uploaded_file = st.file_uploader("Cargar Reporte (CSV)", type="csv")
-    if uploaded_file:
-        st.success("Archivo cargado con éxito")
+    st.markdown("### 🛠️ Herramientas")
+    file = st.file_uploader("Subir Reporte CSV", type="csv")
+    if file:
+        st.success("Reporte cargado correctamente.")
 
-if uploaded_file:
-    # Procesamiento flexible del CSV
-    df = pd.read_csv(uploaded_file)
+if file:
+    # Carga de datos
+    df = pd.read_csv(file)
     
-    # Identificar columnas numéricas automáticamente
+    # Limpieza básica (quitar espacios en nombres de columnas)
+    df.columns = [c.strip() for c in df.columns]
+    
+    # Identificar columnas numéricas para el selector
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     
-    if not num_cols:
-        st.error("No se detectaron columnas numéricas en este archivo. Verifique el formato.")
-    else:
-        # Selección de métrica
-        metric = st.selectbox("Seleccionar Métrica de Telemetría", num_cols)
+    if num_cols:
+        col_select = st.selectbox("📊 Seleccionar Métrica de Telemetría", num_cols)
         
-        # Dashboard de métricas rápidas
-        c1, c2, c3 = st.columns(3)
-        with c1: st.markdown(f'<div class="metric-card"><small>PROMEDIO</small><h3>{df[metric].mean():.2f}</h3></div>', unsafe_allow_html=True)
-        with c2: st.markdown(f'<div class="metric-card"><small>MÁXIMO</small><h3>{df[metric].max():.2f}</h3></div>', unsafe_allow_html=True)
-        with c3: st.markdown(f'<div class="metric-card"><small>MUESTRAS</small><h3>{len(df)}</h3></div>', unsafe_allow_html=True)
+        # Dashboard Superior
+        m1, m2, m3 = st.columns(3)
+        with m1: st.markdown(f'<div class="metric-box"><div class="metric-label">PROMEDIO</div><div class="metric-value">{df[col_select].mean():.2f}</div></div>', unsafe_allow_html=True)
+        with m2: st.markdown(f'<div class="metric-box"><div class="metric-label">MÁXIMO</div><div class="metric-value">{df[col_select].max():.2f}</div></div>', unsafe_allow_html=True)
+        with m3: st.markdown(f'<div class="metric-box"><div class="metric-label">MUESTRAS</div><div class="metric-value">{len(df)}</div></div>', unsafe_allow_html=True)
         
-        st.write("")
-        
-        # Gráfico Interactivo
+        # Gráfica Principal
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=df.index, y=df[metric], 
+            x=df.index, y=df[col_select],
+            mode='lines',
             line=dict(color=MERU_CYAN, width=2),
-            fill='tozeroy', fillcolor='rgba(0, 174, 239, 0.1)'
+            name=col_select,
+            fill='tozeroy',
+            fillcolor='rgba(0, 174, 239, 0.05)'
         ))
         fig.update_layout(
-            template="plotly_dark", height=400, 
-            margin=dict(l=10, r=10, t=10, b=10),
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+            template="plotly_dark", height=450,
+            margin=dict(l=20, r=20, t=20, b=20),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(showgrid=False),
+            yaxis=dict(gridcolor='rgba(255,255,255,0.05)')
         )
         st.plotly_chart(fig, use_container_width=True)
-
-        # SECCIÓN DE IA
+        
+        # SECCIÓN IA
         st.markdown("---")
-        st.subheader("🤖 Diagnóstico Asistido por Gemini")
+        st.subheader("🧠 Diagnóstico Asistido por IA")
         
-        t1, t2 = st.tabs(["💬 Consultar Telemetría", "👁️ Análisis Visual de IA"])
+        tab_chat, tab_vision = st.tabs(["💬 Consultar a la IA", "👁️ Escaneo Visual de Patrones"])
         
-        with t1:
-            user_q = st.text_input("Pregunta algo sobre estos datos:", placeholder="Ej: ¿Hay indicios de lluvia en la señal?")
-            if st.button("Analizar con Gemini"):
-                if user_q:
-                    with st.spinner("Gemini analizando datos..."):
-                        # Pasar un resumen de los datos para contexto
-                        context = f"Métrica: {metric}. Resumen: {df[metric].describe().to_string()}. Pregunta: {user_q}"
-                        response = call_gemini(context)
-                        st.info(response)
+        with tab_chat:
+            st.write("Hazle una pregunta a la IA sobre los logs:")
+            pregunta = st.text_input("Ej: ¿A qué hora se detectó la mayor caída de señal?", key="chat_input")
+            if st.button("Consultar Cerebro"):
+                if pregunta:
+                    with st.spinner("Analizando telemetría..."):
+                        # Contexto enriquecido para la IA
+                        data_summary = f"""
+                        Métrica: {col_select}
+                        Estadísticas: {df[col_select].describe().to_dict()}
+                        Muestras: {len(df)}
+                        Pregunta del usuario: {pregunta}
+                        """
+                        respuesta = call_gemini_api(data_summary)
+                        st.info(respuesta)
                 else:
-                    st.warning("Por favor escribe una pregunta.")
+                    st.warning("Escribe una consulta técnica.")
                     
-        with t2:
-            st.write("Gemini analizará la 'forma' de la gráfica para encontrar patrones de congestión.")
-            if st.button("Escanear Patrones Gráficos"):
-                with st.spinner("Procesando imagen técnica..."):
-                    v_response = get_visual_analysis(df, metric)
-                    st.success(v_response)
-
+        with tab_vision:
+            st.write("La IA analizará la gráfica actual para detectar anomalías invisibles al ojo humano.")
+            if st.button("Ejecutar Escaneo Visual"):
+                with st.spinner("Escaneando formas de onda..."):
+                    analisis_v = analyze_visual_patterns(df, col_select)
+                    st.success(analisis_v)
+    else:
+        st.error("El archivo no contiene columnas numéricas procesables.")
 else:
-    # Pantalla inicial
-    st.info("👋 Bienvenido al Centro de Inteligencia de Meru Networks. Por favor, sube un archivo CSV para iniciar el análisis.")
-    
-    st.markdown("### Generar datos de prueba")
-    if st.button("Crear CSV de Simulación"):
-        t = np.arange(0, 50)
-        # Simular señal satelital con una caída (lluvia) y ruido
-        signal = 12 + np.random.normal(0, 0.5, 50)
-        signal[20:30] = signal[20:30] - 5 # Degradación
-        test_df = pd.DataFrame({'Minuto': t, 'EbNo_dB': signal, 'Traffic_kbps': signal * 100})
-        st.download_button("Descargar CSV de Prueba", test_df.to_csv(index=False), "test_meru.csv")
+    st.info("💡 Sube un archivo CSV desde el panel lateral para iniciar el monitoreo inteligente.")
