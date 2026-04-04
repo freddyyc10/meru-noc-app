@@ -1,152 +1,124 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
-import json
-import os
-from datetime import datetime
-import streamlit.components.v1 as components
+import numpy as np
+import plotly.express as px
+import io
 
-# Configuración de página
-st.set_page_config(page_title="Meru AI - Analizador de Red", layout="wide")
+# Configuración de la página
+st.set_page_config(page_title="Analizador Meru VNO", layout="wide")
 
-# --- DATABASE SETUP ---
-def init_db():
-    conn = sqlite3.connect('meru_history.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS history 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  timestamp TEXT, 
-                  traffic_gb REAL, 
-                  node_count INTEGER, 
-                  anomaly_count INTEGER,
-                  details TEXT)''')
-    conn.commit()
-    conn.close()
+st.title("📊 Analizador de Red Meru VNO")
+st.markdown("Herramienta de procesamiento para reportes de tráfico y calidad de señal.")
 
-def save_to_history(traffic, nodes, anomalies, raw_details):
-    conn = sqlite3.connect('meru_history.db')
-    c = conn.cursor()
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("INSERT INTO history (timestamp, traffic_gb, node_count, anomaly_count, details) VALUES (?, ?, ?, ?, ?)",
-              (timestamp, traffic, nodes, anomalies, json.dumps(raw_details)))
-    conn.commit()
-    conn.close()
-
-def get_history():
-    conn = sqlite3.connect('meru_history.db')
-    df = pd.read_sql_query("SELECT * FROM history ORDER BY id DESC", conn)
-    conn.close()
-    return df
-
-init_db()
-
-# --- APP LOGIC ---
-st.title("🛰️ Meru Networks AI Suite")
-
-# Sidebar
-with st.sidebar:
-    st.header("📥 Importar Archivos Meru")
-    st.markdown("Cargue los reportes exportados directamente.")
-    
-    uploaded_usage = st.file_uploader("1. Reporte de Uso (Data Usage)", type="csv")
-    uploaded_stats = st.file_uploader("2. Estadísticas (Eb/No)", type="csv")
-    
-    st.divider()
-    if st.button("🗑️ Limpiar Base de Datos"):
-        conn = sqlite3.connect('meru_history.db')
-        conn.cursor().execute("DELETE FROM history")
-        conn.commit()
-        conn.close()
-        st.rerun()
-
-# Tabs
-tab_analysis, tab_history = st.tabs(["📊 Dashboard de Análisis", "📜 Historial Guardado"])
-
-if 'current_analysis' not in st.session_state:
-    st.session_state.current_analysis = None
-
-with tab_analysis:
-    if uploaded_usage and uploaded_stats:
-        if st.button("🚀 ANALIZAR DATOS IMPORTADOS", use_container_width=True):
-            try:
-                # 1. PROCESAR DATA USAGE
-                # El archivo tiene 3 líneas de encabezado (Report Name, Units, etc)
-                usage_df = pd.read_csv(uploaded_usage, skiprows=3)
-                
-                # Identificar columnas de datos (excluyendo 'Date')
-                data_cols = [c for c in usage_df.columns if c.lower() != 'date']
-                
-                # Obtener la última fila con datos válidos
-                latest_usage = usage_df.iloc[-1]
-                
-                # Convertir a numérico, forzando errores a 0 y sumando
-                usage_series = pd.to_numeric(latest_usage[data_cols], errors='coerce').fillna(0)
-                total_mb = usage_series.sum()
-                total_gb = round(total_mb / 1024, 2)
-                
-                # Top Nodes (Combinando In/Out para el nombre)
-                top_data = usage_series.sort_values(ascending=False).head(15).to_dict()
-
-                # 2. PROCESAR ESTADÍSTICAS (Eb/No)
-                stats_df = pd.read_csv(uploaded_stats)
-                # Limpiar nombres de columnas (quitar comillas si existen)
-                stats_df.columns = [c.replace('"', '').strip() for c in stats_df.columns]
-                
-                latest_stats = stats_df.iloc[-1]
-                
-                anomalies = []
-                for col in stats_df.columns:
-                    if "Eb/No" in col:
-                        try:
-                            val = float(latest_stats[col])
-                            # Criterio: Menor a 7 es crítico en Meru para estabilidad
-                            if 0 < val < 8.0:
-                                anomalies.append({
-                                    "node": col.split('/')[0],
-                                    "value": val,
-                                    "type": "Eb/No Bajo"
-                                })
-                        except: continue
-
-                # Preparar resultado
-                analysis_result = {
-                    "success": True,
-                    "total_traffic": total_gb,
-                    "anomalies": anomalies,
-                    "node_count": len(data_cols),
-                    "top_nodes": top_data
-                }
-                
-                st.session_state.current_analysis = analysis_result
-                save_to_history(total_gb, len(data_cols), len(anomalies), analysis_result)
-                st.success("Análisis completado exitosamente.")
-            
-            except Exception as e:
-                st.error(f"Error procesando los archivos: {str(e)}")
-                st.info("Asegúrese de que los archivos sean los exportados originales de la plataforma.")
-
-    if st.session_state.current_analysis:
-        path_to_html = "index.html"
-        if os.path.exists(path_to_html):
-            with open(path_to_html, 'r', encoding='utf-8') as f:
-                html_content = f.read()
-            
-            analysis_data = json.dumps(st.session_state.current_analysis)
-            full_html = html_content.replace("window.ANALYSIS_DATA = null;", f"window.ANALYSIS_DATA = {analysis_data};")
-            components.html(full_html, height=800, scrolling=False)
-    else:
-        st.info("Por favor, suba los archivos CSV en el panel lateral para comenzar el análisis.")
-
-with tab_history:
-    history_df = get_history()
-    if not history_df.empty:
-        st.subheader("Registros en Base de Datos")
-        st.dataframe(history_df[["id", "timestamp", "traffic_gb", "node_count", "anomaly_count"]], use_container_width=True)
+def process_data(usage_file, stats_file):
+    try:
+        # 1. Cargar Reporte de Uso (Saltando 3 líneas de encabezado)
+        # Basado en 'VNO Meru-Networks Data Usage Report (20).csv'
+        df_usage_raw = pd.read_csv(usage_file, skiprows=3)
         
-        selected_id = st.selectbox("Seleccionar ID para ver detalle:", history_df['id'])
-        if st.button("Recuperar este análisis"):
-            row = history_df[history_df["id"] == selected_id].iloc[0]
-            st.session_state.current_analysis = json.loads(row["details"])
-            st.rerun()
-    else:
-        st.write("No hay datos históricos aún.")
+        # 2. Cargar Estadísticas (Eb/No)
+        # Basado en 'statistics (44).csv'
+        df_stats_raw = pd.read_csv(stats_file)
+
+        # --- PROCESAMIENTO DE TRÁFICO ---
+        cols_traffic = [c for c in df_usage_raw.columns if c != 'Date']
+        # Obtener nombres de estaciones únicos quitando " In" y " Out"
+        stations = sorted(list(set([c.rsplit(' ', 1)[0] for c in cols_traffic])))
+        
+        usage_data = []
+        for s in stations:
+            col_in = f"{s} In"
+            col_out = f"{s} Out"
+            
+            val_in = pd.to_numeric(df_usage_raw[col_in], errors='coerce').sum() if col_in in df_usage_raw.columns else 0
+            val_out = pd.to_numeric(df_usage_raw[col_out], errors='coerce').sum() if col_out in df_usage_raw.columns else 0
+            
+            usage_data.append({
+                "Estación": s,
+                "Descarga (MB)": round(val_in, 2),
+                "Carga (MB)": round(val_out, 2),
+                "Total (MB)": round(val_in + val_out, 2)
+            })
+            
+        df_usage = pd.DataFrame(usage_data).sort_values(by="Total (MB)", ascending=False)
+
+        # --- PROCESAMIENTO DE EB/NO ---
+        ebno_data = []
+        ebno_cols = [c for c in df_stats_raw.columns if 'Eb/No' in c]
+        
+        for col in ebno_cols:
+            # El formato suele ser "NOMBRE_ESTACION/Tipo Eb/No"
+            parts = col.split('/')
+            station_name = parts[0].strip()
+            tipo = "Forward Link" if "FL" in col else "Return Link"
+            
+            avg_val = pd.to_numeric(df_stats_raw[col], errors='coerce').mean()
+            
+            if not np.isnan(avg_val):
+                ebno_data.append({
+                    "Estación": station_name,
+                    "Tipo": tipo,
+                    "Eb/No Promedio (dB)": round(avg_val, 2)
+                })
+        
+        df_ebno = pd.DataFrame(ebno_data)
+        
+        return df_usage, df_ebno
+
+    except Exception as e:
+        st.error(f"Error al procesar los archivos: {e}")
+        return None, None
+
+# --- Zona de Carga de Archivos ---
+col1, col2 = st.columns(2)
+with col1:
+    u_file = st.file_uploader("Subir Reporte de Uso (Usage Report)", type="csv")
+with col2:
+    s_file = st.file_uploader("Subir Estadísticas (Statistics)", type="csv")
+
+if u_file and s_file:
+    df_u, df_e = process_data(u_file, s_file)
+    
+    if df_u is not None:
+        # Métricas de Resumen
+        st.divider()
+        m1, m2, m3, m4 = st.columns(4)
+        total_red = df_u['Total (MB)'].sum()
+        m1.metric("Tráfico Total", f"{total_red/1024:.2f} GB")
+        m2.metric("Estaciones Activas", len(df_u))
+        
+        if not df_e.empty:
+            avg_fl = df_e[df_e['Tipo'] == 'Forward Link']['Eb/No Promedio (dB)'].mean()
+            m3.metric("Promedio Eb/No FL", f"{avg_fl:.2f} dB")
+            
+            low_signal = len(df_e[df_e['Eb/No Promedio (dB)'] < 8.0])
+            m4.metric("Estaciones Alerta (<8dB)", low_signal)
+
+        # Pestañas de Visualización
+        tab_t, tab_s = st.tabs(["📊 Tráfico de Datos", "📡 Calidad de Señal"])
+        
+        with tab_t:
+            st.subheader("Consumo por Estación")
+            fig_usage = px.bar(df_u.head(20), x='Estación', y=['Descarga (MB)', 'Carga (MB)'],
+                               title="Top 20 Estaciones por Consumo",
+                               barmode='group',
+                               color_discrete_map={'Descarga (MB)': '#00CC96', 'Carga (MB)': '#636EFA'})
+            st.plotly_chart(fig_usage, use_container_width=True)
+            
+            st.dataframe(df_u, use_container_width=True, hide_index=True)
+
+        with tab_s:
+            if not df_e.empty:
+                st.subheader("Análisis de Eb/No")
+                fig_ebno = px.scatter(df_e, x='Estación', y='Eb/No Promedio (dB)', color='Tipo',
+                                     title="Niveles de Eb/No detectados",
+                                     height=500)
+                fig_ebno.add_hline(y=8.0, line_dash="dash", line_color="red", annotation_text="Umbral Crítico")
+                st.plotly_chart(fig_ebno, use_container_width=True)
+                
+                st.dataframe(df_e, use_container_width=True, hide_index=True)
+            else:
+                st.warning("No se detectaron datos de Eb/No válidos en el archivo de estadísticas.")
+
+else:
+    st.info("Por favor, sube ambos archivos para iniciar el análisis.")
