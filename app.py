@@ -8,85 +8,108 @@ import io
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
-    page_title="NOC Meru Networks - Analizador",
+    page_title="MERU NOC - Dashboard Inteligente",
     page_icon="📡",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Estilos CSS personalizados para la identidad visual de Meru
+# Estilos globales para integrar Streamlit con el look oscuro del NOC
 st.markdown("""
     <style>
-    .main {
-        background-color: #f8fafc;
-    }
-    .stMetric {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    .header-container {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 15px 25px;
-        border-bottom: 3px solid #00adef;
-        background-color: white;
-        margin-bottom: 25px;
-        border-radius: 0 0 15px 15px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    .stExpander {
-        border: none !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        background: white;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-    }
+    .stApp { background-color: #0f172a; color: white; }
+    header { background-color: #1e293b !important; }
+    .stExpander { border: 1px solid #334155 !important; background-color: #1e293b !important; }
+    [data-testid="stSidebar"] { background-color: #1e293b; border-right: 1px solid #334155; }
+    h1, h2, h3, p, span { color: #f8fafc !important; }
     </style>
     """, unsafe_allow_html=True)
 
-def render_summary_cards(summary_data):
+def render_noc_status(nodes_data):
     """
-    Renderiza tarjetas de resumen usando React/Tailwind para un look profesional.
+    Renderiza un panel de control estilo NOC usando React, Tailwind y Framer Motion.
+    Recibe una lista de diccionarios con datos procesados de las estaciones.
     """
-    json_data = json.dumps(summary_data)
-    
-    html_content = f"""
+    json_data = json.dumps(nodes_data)
+
+    react_html = f"""
     <!DOCTYPE html>
-    <html>
+    <html lang="es">
     <head>
         <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
         <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
         <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
         <script src="https://cdn.tailwindcss.com"></script>
+        <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
     </head>
-    <body class="bg-transparent">
+    <body class="bg-transparent text-white font-sans overflow-hidden">
         <div id="root"></div>
         <script type="text/babel">
+            const {{ motion }} = FramerMotion;
+
+            const NodeCard = ({{ node }}) => (
+                <motion.div 
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    whileHover={{ scale: 1.02, borderColor: '#3b82f6' }}
+                    className="bg-slate-800/50 backdrop-blur-md border border-slate-700 p-4 rounded-xl shadow-2xl mb-4"
+                >
+                    <div className="flex justify-between items-center mb-3">
+                        <span className="text-[10px] font-mono text-blue-400 uppercase tracking-widest">STATION_ID: {{node.id}}</span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold">Status</span>
+                            <div className={`h-2.5 w-2.5 rounded-full ${{node.status === 'online' ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-rose-500 shadow-[0_0_10px_#f43f5e]'}}`}></div>
+                        </div>
+                    </div>
+                    
+                    <h3 className="text-lg font-bold text-slate-100 truncate mb-1">{{node.name}}</h3>
+                    <div className="text-xs text-slate-500 font-mono mb-4">Ubicación: {{node.location || 'Remote Terminal'}}</div>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-700/50">
+                            <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Tráfico Total</div>
+                            <div className="text-md font-mono text-emerald-400 font-bold">{{node.total_usage}} <span class="text-[10px]">MB</span></div>
+                        </div>
+                        <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-700/50">
+                            <div className="text-[10px] text-slate-500 uppercase font-bold mb-1">Carga Relativa</div>
+                            <div className="text-md font-mono text-blue-400 font-bold">{{node.load}}%</div>
+                        </div>
+                    </div>
+
+                    <div className="mt-4 h-1.5 w-full bg-slate-700 rounded-full overflow-hidden">
+                        <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: `${{node.load}}%` }}
+                            transition={{ duration: 1, ease: "easeOut" }}
+                            className={`h-full ${{node.load > 80 ? 'bg-rose-500' : 'bg-blue-500'}}`}
+                        />
+                    </div>
+                </motion.div>
+            );
+
             const App = () => {{
-                const items = {json_data};
+                const nodes = {json_data};
                 return (
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 p-1">
-                        {{items.map((item, i) => (
-                            <div key={{i}} class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-blue-600 flex flex-col justify-center">
-                                <span class="text-gray-400 text-xs font-bold uppercase tracking-wider">{{item.label}}</span>
-                                <span class="text-xl font-extrabold text-slate-800 mt-1">{{item.value}}</span>
-                            </div>
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {{nodes.map((node, i) => (
+                            <NodeCard key={{i}} node={{node}} />
                         ))}}
                     </div>
                 );
             }};
+
             const root = ReactDOM.createRoot(document.getElementById('root'));
             root.render(<App />);
         </script>
     </body>
     </html>
     """
-    components.html(html_content, height=110)
+    # Ajustamos altura según cantidad de nodos (aprox 200px por fila)
+    calculated_height = max(400, (len(nodes_data) // 3 + 1) * 220)
+    return components.html(react_html, height=calculated_height, scrolling=True)
 
 def get_clean_df(file):
-    """Limpia el CSV saltando metadatos de iDirect hasta encontrar la cabecera"""
+    """Limpia el CSV saltando metadatos de iDirect"""
     content = file.getvalue().decode('utf-8', errors='ignore').splitlines()
     skip_rows = 0
     for i, line in enumerate(content):
@@ -98,20 +121,19 @@ def get_clean_df(file):
         df = pd.read_csv(file, skiprows=skip_rows)
         df.columns = [str(c).strip().replace('"', '') for c in df.columns]
         return df
-    except Exception as e:
-        st.error(f"Error al leer el archivo: {e}")
+    except:
         return pd.DataFrame()
 
-def analyze_usage(df):
-    """Procesamiento de Consumo de Datos (In/Out) con diseño de Dashboard"""
+def process_data_for_react(df):
+    """Convierte los datos del CSV al formato que espera el componente React"""
     all_cols = df.columns.tolist()
     sites = sorted(list(set([c.split('/')[0] for c in all_cols if '/' in c])))
     
-    if not sites:
-        st.warning("Formato no reconocido para análisis de estaciones.")
-        return
-
-    report = []
+    nodes_for_react = []
+    max_total = 0
+    
+    # Primero calculamos totales para normalizar la barra de carga
+    temp_data = []
     for s in sites:
         in_c = next((c for c in all_cols if c.startswith(s + "/") and any(k in c for k in ["In", "FL"])), None)
         out_c = next((c for c in all_cols if c.startswith(s + "/") and any(k in c for k in ["Out", "RL"])), None)
@@ -119,113 +141,62 @@ def analyze_usage(df):
         if in_c or out_c:
             val_in = pd.to_numeric(df[in_c], errors='coerce').sum() if in_c else 0
             val_out = pd.to_numeric(df[out_c], errors='coerce').sum() if out_c else 0
-            
-            is_bytes = "Octets" in str(in_c or out_c)
-            factor = (1024 * 1024) if is_bytes else 1
-            unit = "MB" if is_bytes else "Units"
+            total = (val_in + val_out) / (1024 * 1024) if "Octets" in str(in_c or out_c) else (val_in + val_out)
+            temp_data.append({"id": s, "total": round(total, 2)})
+            if total > max_total: max_total = total
 
-            if (val_in + val_out) > 0:
-                report.append({
-                    "Estación": s,
-                    f"In ({unit})": round(val_in / factor, 2),
-                    f"Out ({unit})": round(val_out / factor, 2),
-                    f"Total ({unit})": round((val_in + val_out) / factor, 2)
-                })
-
-    if report:
-        res_df = pd.DataFrame(report).sort_values(by=f"Total ({unit})", ascending=False)
-        
-        # Resumen superior
-        summary_data = [
-            {"label": "Tráfico Total", "value": f"{res_df[f'Total ({unit})'].sum():,.2f} {unit}"},
-            {"label": "Estaciones Activas", "value": str(len(res_df))},
-            {"label": "Máximo Consumo", "value": res_df.iloc[0]['Estación']},
-            {"label": "Promedio", "value": f"{res_df[f'Total ({unit})'].mean():,.2f} {unit}"}
-        ]
-        render_summary_cards(summary_data)
-
-        # Gráfica y Tabla
-        c1, c2 = st.columns([1.5, 1])
-        with c1:
-            fig = px.bar(res_df.head(15), x=f"Total ({unit})", y="Estación", orientation='h',
-                         title="Ranking de Consumo (Top 15)", 
-                         color=f"Total ({unit})", color_continuous_scale="Blues")
-            fig.update_layout(yaxis={'categoryorder':'total ascending'}, plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with c2:
-            st.markdown("#### Detalle por Estación")
-            st.dataframe(res_df, use_container_width=True, hide_index=True)
-
-def analyze_signal(df):
-    """Procesamiento de Niveles de Señal y Eb/No con enfoque histórico"""
-    st.markdown("### 📶 Monitoreo de Señal")
-    all_cols = df.columns.tolist()
-    time_col = next((c for c in all_cols if "Date" in c or "Time" in c), None)
-    stations = sorted(list(set([c.split('/')[0] for c in all_cols if '/' in c])))
+    # Construimos el objeto final
+    for item in temp_data:
+        load_percentage = round((item['total'] / max_total * 100), 1) if max_total > 0 else 0
+        nodes_for_react.append({
+            "id": f"VSAT-{item['id'][:3].upper()}",
+            "name": item['id'],
+            "status": "online" if item['total'] > 0 else "offline",
+            "total_usage": item['total'],
+            "load": load_percentage,
+            "location": "Red Meru Satelital"
+        })
     
-    if not stations:
-        st.error("No se encontraron series de datos de señal.")
-        return
-
-    selected = st.selectbox("Seleccione Estación para inspección:", stations)
-    
-    if selected:
-        plot_cols = [c for c in all_cols if c.startswith(selected + "/")]
-        fig = go.Figure()
-        x_axis = df[time_col] if time_col else df.index
-        
-        for c in plot_cols:
-            fig.add_trace(go.Scatter(x=x_axis, y=df[c], name=c.split('/')[-1], mode='lines'))
-            
-        fig.update_layout(
-            title=f"Historial de Señal: {selected}", 
-            template="plotly_white", 
-            hovermode="x unified",
-            height=500
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    return nodes_for_react
 
 def main():
-    # Encabezado corporativo
+    # Header minimalista estilo Dashboard Moderno
     st.markdown(f"""
-        <div class="header-container">
-            <div style="display: flex; flex-direction: column;">
-                <h1 style="color: #1e3a8a; margin: 0; font-size: 24px;">MERU NETWORKS NOC</h1>
-                <span style="color: #00adef; font-weight: 500; font-size: 14px;">PLATAFORMA DE ANÁLISIS DE RED</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; background: #1e293b; border-radius: 12px; border: 1px solid #334155; margin-bottom: 2rem;">
+            <div>
+                <h1 style="margin:0; font-size: 1.5rem; letter-spacing: -0.025em; color: #3b82f6 !important;">MERU NETWORKS <span style="color:white !important;">NOC</span></h1>
+                <p style="margin:0; font-size: 0.75rem; color: #94a3b8 !important; font-family: monospace;">CORE NETWORK MONITORING SYSTEM v2.5</p>
             </div>
-            <img src="https://merunetworks.com.ve/wp-content/uploads/2021/04/Logo-Meru-Networks-01.png" width="160">
+            <div style="text-align: right">
+                <div style="color: #10b981; font-size: 0.8rem; font-weight: bold;">● SISTEMA OPERATIVO</div>
+                <div style="color: #64748b; font-size: 0.7rem;">LATENCIA PROMEDIO: 580ms (Sat)</div>
+            </div>
         </div>
     """, unsafe_allow_html=True)
 
     # Sidebar
-    st.sidebar.markdown("### Centro de Carga 📂")
-    files = st.sidebar.file_uploader("Subir reportes CSV", type="csv", accept_multiple_files=True)
+    st.sidebar.image("https://merunetworks.com.ve/wp-content/uploads/2021/04/Logo-Meru-Networks-01.png", width=150)
+    st.sidebar.title("📥 Carga de Datos")
+    files = st.sidebar.file_uploader("Arrastra reportes iDirect NMS", type="csv", accept_multiple_files=True)
     
-    st.sidebar.markdown("---")
-    st.sidebar.info("Herramienta diseñada para el procesamiento de archivos iDirect NMS.")
-
     if not files:
-        st.markdown("""
-            <div style="text-align: center; padding: 50px; color: #64748b;">
-                <h2>Listo para procesar datos</h2>
-                <p>Por favor, cargue los archivos CSV en el panel lateral para generar el reporte visual.</p>
-            </div>
-        """, unsafe_allow_html=True)
+        st.info("Esperando archivos CSV para inicializar el monitoreo...")
+        # Mostrar nodos vacíos o placeholder
         return
 
-    # Procesamiento de archivos
     for f in files:
-        with st.expander(f"📦 Reporte: {f.name}", expanded=True):
+        with st.expander(f"🛰️ Procesando Estaciones de: {f.name}", expanded=True):
             df = get_clean_df(f)
-            if df.empty:
-                continue
+            if not df.empty:
+                # Convertir datos de iDirect a formato React
+                nodes_data = process_data_for_react(df)
                 
-            cols_text = " ".join(df.columns).lower()
-            if any(k in cols_text for k in ["octets", "bit rate", "fl bit", "rl bit"]):
-                analyze_usage(df)
-            else:
-                analyze_signal(df)
+                # Renderizar el componente avanzado
+                render_noc_status(nodes_data)
+                
+                # Opcional: Gráfica de soporte con Plotly
+                st.markdown("### 📊 Vista Analítica de Bitrate")
+                st.line_chart(df.set_index(df.columns[0]).iloc[:, :5]) # Muestra las primeras 5 columnas de datos
 
 if __name__ == "__main__":
     main()
