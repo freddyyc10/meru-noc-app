@@ -7,26 +7,26 @@ import time
 import io
 
 # Configuración de página
-st.set_page_config(page_title="Meru VNO - Inteligencia de Red", layout="wide")
+st.set_page_config(page_title="Meru VNO - AI Network Insights", layout="wide")
 
-# --- Estilos CSS ---
+# --- Estilos CSS (Sin dependencias externas) ---
 st.markdown("""
     <style>
-    .main { background-color: #f4f7f6; }
+    .main { background-color: #f8f9fa; }
     .report-container { 
-        background-color: #ffffff; 
+        background-color: white; 
         padding: 25px; 
-        border-radius: 15px; 
-        border-left: 8px solid #1E88E5;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        border-radius: 12px; 
+        border-left: 8px solid #007bff;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        color: #2c3e50;
+        line-height: 1.6;
     }
-    .status-critical { color: #d32f2f; font-weight: bold; }
-    .status-ok { color: #388e3c; font-weight: bold; }
+    .stMetric { background-color: white; padding: 15px; border-radius: 10px; border: 1px solid #eee; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- Configuración de API Gemini (Gestión Automática) ---
+# --- Configuración de API Gemini (Inyectada automáticamente) ---
 apiKey = "" 
 
 def get_gemini_analysis(prompt_content):
@@ -34,145 +34,98 @@ def get_gemini_analysis(prompt_content):
     payload = {
         "contents": [{"parts": [{"text": prompt_content}]}],
         "systemInstruction": {
-            "parts": [{"text": "Eres un experto en telemetría satelital y NOC. Analiza tablas de consumo (MB) y niveles Eb/No. Identifica estaciones con bajo Eb/No (menor a 9dB) y alto tráfico. Genera un diagnóstico técnico y recomendaciones de re-apuntamiento o revisión de hardware."}]
+            "parts": [{"text": "Eres un experto en NOC de redes satelitales. Tu tarea es analizar el tráfico y los niveles Eb/No. Identifica estaciones con señal crítica (FL < 9dB) y alto consumo. Ofrece recomendaciones técnicas en español."}]
         }
     }
-    # Implementación de reintentos con backoff exponencial
-    for delay in [1, 2, 4, 8]:
+    for delay in [1, 2, 4]:
         try:
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=payload, timeout=25)
             if response.status_code == 200:
                 return response.json()['candidates'][0]['content']['parts'][0]['text']
-        except Exception:
-            time.sleep(delay)
-    return "No se pudo obtener el diagnóstico de la IA tras varios intentos. Verifique la conexión."
+        except: time.sleep(delay)
+    return "La IA no pudo procesar el reporte en este momento. Por favor reintente."
 
-# --- Procesamiento de Archivos ---
-def process_vno_data(usage_file, ebno_file):
+# --- Procesador de Datos Robusto ---
+def process_data(usage_file, stats_file):
     try:
-        # 1. Procesar Reporte de Uso (Uso de MB)
-        # Saltamos 3 líneas como indica la estructura del archivo
-        usage_bytes = usage_file.getvalue().decode('utf-8')
-        df_usage_raw = pd.read_csv(io.StringIO(usage_bytes), skiprows=3)
+        # 1. Procesar Tráfico (Usage Report) - Saltando las 3 líneas de Meru
+        u_bytes = usage_file.getvalue().decode('utf-8')
+        df_u_raw = pd.read_csv(io.StringIO(u_bytes), skiprows=3)
         
-        usage_data = []
-        # Buscamos columnas que terminen en " In"
-        for col in df_usage_raw.columns:
+        usage_list = []
+        for col in df_u_raw.columns:
             if col.endswith(" In"):
-                station_name = col.replace(" In", "").strip()
-                out_col = f"{station_name} Out"
-                
-                in_val = pd.to_numeric(df_usage_raw[col], errors='coerce').sum()
-                out_val = pd.to_numeric(df_usage_raw[out_col], errors='coerce').sum() if out_col in df_usage_raw.columns else 0
-                
-                usage_data.append({
-                    "Estación": station_name,
-                    "In_MB": in_val,
-                    "Out_MB": out_val,
-                    "Total_MB": in_val + out_val
-                })
-        
-        df_usage = pd.DataFrame(usage_data)
+                st_name = col.replace(" In", "").strip()
+                in_val = pd.to_numeric(df_u_raw[col], errors='coerce').sum()
+                out_col = f"{st_name} Out"
+                out_val = pd.to_numeric(df_u_raw[out_col], errors='coerce').sum() if out_col in df_u_raw.columns else 0
+                usage_list.append({"Estación": st_name, "MB_Total": round(in_val + out_val, 2)})
+        df_usage = pd.DataFrame(usage_list)
 
-        # 2. Procesar Statistics (Eb/No)
-        ebno_bytes = ebno_file.getvalue().decode('utf-8')
-        df_ebno_raw = pd.read_csv(io.StringIO(ebno_bytes))
+        # 2. Procesar Eb/No (Statistics 44/45)
+        s_bytes = stats_file.getvalue().decode('utf-8')
+        df_s_raw = pd.read_csv(io.StringIO(s_bytes))
         
-        ebno_stats = []
-        for col in df_ebno_raw.columns:
+        ebno_list = []
+        for col in df_s_raw.columns:
             if "/" in col and "Eb/No" in col:
-                # El formato es "NOMBRE_ESTACION/TIPO Eb/No"
-                parts = col.split("/")
-                station_name = parts[0].replace('"', '').strip()
-                metric_name = parts[1]
-                
-                avg_val = pd.to_numeric(df_ebno_raw[col], errors='coerce').mean()
-                
-                # Identificar si es Forward Link o Return Link
-                link_type = "FL" if "FL" in metric_name else "RL"
-                
-                ebno_stats.append({
-                    "Estación": station_name,
-                    "Tipo": link_type,
-                    "Valor": avg_val
-                })
+                st_name = col.split("/")[0].replace('"', '').strip()
+                link_type = "FL" if "FL" in col else "RL"
+                avg_val = pd.to_numeric(df_s_raw[col], errors='coerce').mean()
+                if not np.isnan(avg_val):
+                    ebno_list.append({"Estación": st_name, "Tipo": link_type, "Val": round(avg_val, 2)})
         
-        df_ebno_long = pd.DataFrame(ebno_stats)
-        # Pivotamos para tener FL y RL en columnas separadas
-        df_ebno_pivot = df_ebno_long.pivot_table(index="Estación", columns="Tipo", values="Valor").reset_index()
-
-        # 3. Cruzar los datos (Merge)
-        df_final = pd.merge(df_usage, df_ebno_pivot, on="Estación", how="inner")
-        return df_final
-
+        if ebno_list:
+            df_ebno = pd.DataFrame(ebno_list).pivot_table(index="Estación", columns="Tipo", values="Val").reset_index()
+            # Unir datos
+            return pd.merge(df_usage, df_ebno, on="Estación", how="inner")
+        return None
     except Exception as e:
-        st.error(f"Error en el procesamiento: {e}")
+        st.error(f"Error al procesar archivos: {e}")
         return None
 
-# --- UI de la Aplicación ---
-st.title("🛰️ Analizador de Telemetría Meru VNO")
-st.markdown("Cruce de datos de consumo y niveles de señal para diagnóstico automático.")
+# --- UI ---
+st.title("🛰️ Meru VNO AI Diagnostics")
 
 with st.sidebar:
-    st.header("Carga de Archivos")
-    u_file = st.file_uploader("Subir Usage Report (.csv)", type="csv")
-    e_file = st.file_uploader("Subir Statistics Eb/No (.csv)", type="csv")
+    st.header("Archivos del HUB")
+    u_f = st.file_uploader("Subir Usage Report (20)", type="csv")
+    s_f = st.file_uploader("Subir Statistics (44 o 45)", type="csv")
+    st.divider()
+    btn = st.button("🪄 Generar Análisis IA", type="primary", use_container_width=True)
+
+if u_f and s_f:
+    df = process_data(u_f, s_f)
     
-    analyze_btn = st.button("Analizar con IA", type="primary", use_container_width=True)
+    if df is not None:
+        # Métricas principales
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Estaciones Reportadas", len(df))
+        c2.metric("Tráfico Total (GB)", f"{df['MB_Total'].sum()/1024:.1f}")
+        if 'FL' in df.columns:
+            c3.metric("Eb/No FL Promedio", f"{df['FL'].mean():.1f} dB")
 
-if u_file and e_file:
-    with st.spinner("Procesando datos..."):
-        full_df = process_vno_data(u_file, e_file)
+        t1, t2 = st.tabs(["🤖 Informe de Gemini", "📊 Telemetría y Gráficos"])
 
-    if full_df is not None:
-        # Métricas Generales
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Estaciones", len(full_df))
-        m2.metric("Consumo Total (GB)", f"{full_df['Total_MB'].sum()/1024:.2f}")
-        
-        avg_fl = full_df['FL'].mean() if 'FL' in full_df.columns else 0
-        m3.metric("Promedio Eb/No FL", f"{avg_fl:.2f} dB")
-
-        # Tabs para visualización
-        tab1, tab2, tab3 = st.tabs(["📊 Visualización", "📋 Datos Crudos", "🤖 Diagnóstico IA"])
-
-        with tab1:
-            col_a, col_b = st.columns(2)
-            with col_a:
-                fig_cons = px.bar(full_df.sort_values("Total_MB", ascending=False).head(15), 
-                                 x="Estación", y="Total_MB", title="Top 15 Consumo (MB)",
-                                 color_discrete_sequence=['#1E88E5'])
-                st.plotly_chart(fig_cons, use_container_width=True)
-            
-            with col_b:
-                if 'FL' in full_df.columns:
-                    fig_signal = px.scatter(full_df, x="Total_MB", y="FL", 
-                                          hover_name="Estación", title="Tráfico vs Calidad de Señal (FL)",
-                                          labels={"FL": "Eb/No Forward (dB)", "Total_MB": "Tráfico Total (MB)"})
-                    fig_signal.add_hline(y=9.0, line_dash="dash", line_color="red", annotation_text="Umbral Crítico")
-                    st.plotly_chart(fig_signal, use_container_width=True)
-
-        with tab2:
-            st.dataframe(full_df.style.background_gradient(subset=['FL'], cmap='RdYlGn', vmin=7, vmax=12), use_container_width=True)
-
-        with tab3:
-            if analyze_btn:
-                # Filtrar casos interesantes para la IA (bajo nivel de señal o alto tráfico)
-                criticos = full_df[full_df['FL'] < 9.5].sort_values('FL')
-                tops = full_df.sort_values('Total_MB', ascending=False).head(10)
-                
-                contexto = f"""
-                DATOS DE ESTACIONES CRÍTICAS (Señal < 9.5dB):
-                {criticos[['Estación', 'Total_MB', 'FL', 'RL']].to_string() if 'RL' in full_df.columns else criticos[['Estación', 'Total_MB', 'FL']].to_string()}
-                
-                DATOS DE MAYOR CONSUMO:
-                {tops[['Estación', 'Total_MB', 'FL']].to_string()}
-                """
-                
-                with st.spinner("Gemini analizando patrones..."):
-                    diagnostico = get_gemini_analysis(contexto)
-                    st.markdown(f"<div class='report-container'>{diagnostico}</div>", unsafe_allow_html=True)
+        with t1:
+            if btn:
+                with st.spinner("Analizando con Gemini 2.5 Flash..."):
+                    # Enviamos solo lo relevante para no saturar el prompt
+                    top_ia = df.sort_values("FL").head(10).to_string(index=False)
+                    res = get_gemini_analysis(f"Analiza estas estaciones (las de menor Eb/No):\n{top_ia}")
+                    st.markdown(f"<div class='report-container'>{res}</div>", unsafe_allow_html=True)
             else:
-                st.info("Presiona el botón 'Analizar con IA' en el panel lateral para obtener el diagnóstico detallado.")
+                st.info("Presiona el botón en la barra lateral para iniciar el análisis con IA.")
+
+        with t2:
+            st.subheader("Estado de Estaciones")
+            st.dataframe(df.sort_values("MB_Total", ascending=False), use_container_width=True)
+            
+            if 'FL' in df.columns:
+                fig = px.scatter(df, x="MB_Total", y="FL", hover_name="Estación", 
+                                 title="Correlación: Consumo vs Calidad de Señal",
+                                 labels={"FL": "Eb/No Forward (dB)", "MB_Total": "Tráfico (MB)"})
+                fig.add_hline(y=9.0, line_dash="dash", line_color="red")
+                st.plotly_chart(fig, use_container_width=True)
 else:
-    st.info("👋 Por favor, carga los archivos .csv para comenzar.")
+    st.info("Por favor, carga los archivos CSV en el panel lateral.")
